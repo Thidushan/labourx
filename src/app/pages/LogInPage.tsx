@@ -24,6 +24,15 @@ export function LoginPage() {
 
   const navigate = useNavigate();
 
+  // ✅ FIXED BACK BUTTON LOGIC
+  const handleBack = () => {
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate('/');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -103,7 +112,7 @@ export function LoginPage() {
 
       {/* Back Button */}
       <button
-        onClick={() => navigate(-1)}
+        onClick={handleBack}
         className="absolute top-5 left-5 inline-flex items-center gap-1.5 text-maroon hover:text-maroon-dark transition-colors text-sm"
         style={{ fontWeight: 500 }}
       >
@@ -132,7 +141,7 @@ export function LoginPage() {
 
         <div className="bg-card border border-border rounded-2xl p-8 shadow-lg">
 
-          {/* Role Toggle (UI only, not needed for auth) */}
+          {/* Role Toggle */}
           <div className="flex rounded-xl border border-border overflow-hidden mb-6">
             <button
               type="button"
