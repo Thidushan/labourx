@@ -1,10 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link, Navigate } from 'react-router-dom';
-import { ArrowLeft, FileText, MapPin, DollarSign, Clock, Tag, CheckCircle } from 'lucide-react';
+import { ArrowLeft, FileText, MapPin, DollarSign, Clock, Tag, CheckCircle, Image, X } from 'lucide-react';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { SPECIALTIES } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { db } from '../../firebase/config';
+import { db, storage } from '../../firebase/config';
+
+const MAX_FILES = 5;
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
 
 export function EditPostPage() {
   const { id } = useParams<{ id: string }>();
@@ -16,6 +21,11 @@ export function EditPostPage() {
   const [loadingPost, setLoadingPost] = useState(true);
   const [postExists, setPostExists] = useState(true);
   const [postOwnerId, setPostOwnerId] = useState<string | null>(null);
+
+  const [existingImages, setExistingImages] = useState<string[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [removedImages, setRemovedImages] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState({
     title: '',
@@ -51,12 +61,14 @@ export function EditPostPage() {
         const data = postSnap.data();
 
         setPostOwnerId(data.userId || null);
+        setExistingImages(Array.isArray(data.images) ? data.images : []);
+        setRemovedImages([]);
 
         setForm({
           title: data.title || '',
           description: data.description || '',
           category: data.category || '',
-          location: data.area || data.location || '',
+          location: data.area || '',
           city: data.city || data.userCity || '',
           budgetMin:
             data.budgetMin !== undefined && data.budgetMin !== null
@@ -133,6 +145,101 @@ export function EditPostPage() {
   const update = (field: string, value: string) =>
     setForm((f) => ({ ...f, [field]: value }));
 
+  const validateFiles = (files: File[]) => {
+    for (const file of files) {
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        alert(`"${file.name}" is not a supported image type. Please upload PNG or JPG files only.`);
+        return false;
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        alert(`"${file.name}" is too large. Maximum size is 10MB per image.`);
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const incoming = e.target.files ? Array.from(e.target.files) : [];
+    if (incoming.length === 0) return;
+
+    if (!validateFiles(incoming)) {
+      e.target.value = '';
+      return;
+    }
+
+    const currentCount = existingImages.length + selectedFiles.length;
+    const remainingSlots = MAX_FILES - currentCount;
+
+    if (remainingSlots <= 0) {
+      alert(`You can upload a maximum of ${MAX_FILES} images.`);
+      e.target.value = '';
+      return;
+    }
+
+    const nextFiles = incoming.slice(0, remainingSlots);
+    setSelectedFiles((prev) => [...prev, ...nextFiles]);
+
+    if (incoming.length > remainingSlots) {
+      alert(`Only ${MAX_FILES} images are allowed. Extra files were ignored.`);
+    }
+
+    e.target.value = '';
+  };
+
+  const removeExistingImage = (index: number) => {
+    setExistingImages((prev) => {
+      const imageToRemove = prev[index];
+
+      if (imageToRemove) {
+        setRemovedImages((removed) =>
+          removed.includes(imageToRemove) ? removed : [...removed, imageToRemove]
+        );
+      }
+
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const removeSelectedFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const uploadNewImages = async () => {
+    if (selectedFiles.length === 0) return [];
+
+    const uploadPromises = selectedFiles.map(async (file, index) => {
+      const safeName = file.name.replace(/\s+/g, '-');
+      const fileRef = ref(
+        storage,
+        `posts/${currentUser.uid}/${Date.now()}-${index}-${safeName}`
+      );
+
+      await uploadBytes(fileRef, file);
+      return getDownloadURL(fileRef);
+    });
+
+    return Promise.all(uploadPromises);
+  };
+
+  const deleteRemovedImagesFromStorage = async () => {
+    if (removedImages.length === 0) return;
+
+    await Promise.all(
+      removedImages.map(async (imageUrl) => {
+        try {
+          const imageRef = ref(storage, imageUrl);
+          await deleteObject(imageRef);
+        } catch (error) {
+          console.error('Error deleting image from storage:', imageUrl, error);
+          throw error;
+        }
+      })
+    );
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -143,8 +250,18 @@ export function EditPostPage() {
       return;
     }
 
+    if (existingImages.length + selectedFiles.length > MAX_FILES) {
+      alert(`You can upload a maximum of ${MAX_FILES} images.`);
+      return;
+    }
+
     try {
       setLoading(true);
+
+      const uploadedImageUrls = await uploadNewImages();
+      const finalImages = [...existingImages, ...uploadedImageUrls];
+
+      await deleteRemovedImagesFromStorage();
 
       await updateDoc(doc(db, 'posts', id), {
         title: form.title.trim(),
@@ -157,13 +274,19 @@ export function EditPostPage() {
         budgetMax: Number(form.budgetMax),
         timeline: form.timeline.trim(),
         status: form.status,
+        images: finalImages,
         updatedAt: serverTimestamp(),
       });
 
       setSubmitted(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating post:', error);
-      alert('Failed to update post. Please try again.');
+
+      if (error?.code?.includes('storage')) {
+        alert('Image upload or delete failed. Please check Firebase Storage rules and try again.');
+      } else {
+        alert('Failed to update post. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -216,7 +339,6 @@ export function EditPostPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <div className="bg-maroon py-8">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
           <button
@@ -237,7 +359,6 @@ export function EditPostPage() {
 
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Status */}
           <div className="bg-card border border-border rounded-xl p-5">
             <label
               className={`${labelClass} flex items-center gap-1`}
@@ -264,7 +385,6 @@ export function EditPostPage() {
             </div>
           </div>
 
-          {/* Project Details */}
           <div className="bg-card border border-border rounded-xl p-6">
             <div className="flex items-center gap-2 mb-5">
               <FileText className="w-5 h-5 text-maroon" />
@@ -319,7 +439,6 @@ export function EditPostPage() {
             </div>
           </div>
 
-          {/* Location */}
           <div className="bg-card border border-border rounded-xl p-6">
             <div className="flex items-center gap-2 mb-5">
               <MapPin className="w-5 h-5 text-maroon" />
@@ -355,7 +474,6 @@ export function EditPostPage() {
             </div>
           </div>
 
-          {/* Budget & Timeline */}
           <div className="bg-card border border-border rounded-xl p-6">
             <div className="flex items-center gap-2 mb-5">
               <DollarSign className="w-5 h-5 text-gold" />
@@ -406,7 +524,75 @@ export function EditPostPage() {
             </div>
           </div>
 
-          {/* Actions */}
+          <div className="bg-card border border-border rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Image className="w-5 h-5 text-maroon" />
+              <h2 className="text-foreground" style={{ fontWeight: 600 }}>Reference Images (Optional)</h2>
+            </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/jpg"
+              multiple
+              className="hidden"
+              onChange={handleFileChange}
+            />
+
+            <div
+              className="border-2 border-dashed border-border rounded-xl p-8 text-center cursor-pointer hover:border-maroon/40 transition-colors"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Image className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+              <p className="text-muted-foreground text-sm">
+                Drag & drop images or{' '}
+                <span className="text-maroon hover:underline cursor-pointer" style={{ fontWeight: 500 }}>
+                  browse files
+                </span>
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">PNG, JPG up to 10MB each (max 5 images)</p>
+            </div>
+
+            {(existingImages.length > 0 || selectedFiles.length > 0) && (
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {existingImages.map((imageUrl, i) => (
+                  <div key={`existing-${i}`} className="relative group rounded-lg overflow-hidden border border-border aspect-video bg-muted">
+                    <img
+                      src={imageUrl}
+                      alt={`Existing ${i + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeExistingImage(i)}
+                      className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+
+                {selectedFiles.map((file, i) => (
+                  <div key={`new-${i}`} className="relative group rounded-lg overflow-hidden border border-border aspect-video bg-muted">
+                    <img
+                      src={URL.createObjectURL(file)}
+                      alt={file.name}
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeSelectedFile(i)}
+                      className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                    <p className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs px-2 py-1 truncate">{file.name}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="flex gap-3">
             <button
               type="submit"

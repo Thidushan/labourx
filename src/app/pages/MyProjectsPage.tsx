@@ -4,7 +4,7 @@ import {
   Briefcase, MapPin, DollarSign, Clock, Users, CheckCircle,
   Tag, Edit, Eye, Star, Calendar, ArrowRight, FolderOpen
 } from 'lucide-react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { mockTechnicians } from '../data/mockData';
 import { useAuth } from '../context/AuthContext';
@@ -30,24 +30,25 @@ export function MyProjectsPage() {
   const [wonBids, setWonBids] = useState<WorkPost[]>([]);
 
   useEffect(() => {
-    const fetchProjects = async () => {
-      if (!currentUser) {
-        setLoading(false);
-        return;
-      }
+    if (!currentUser) {
+      setLoading(false);
+      setUserPosts([]);
+      setWonBids([]);
+      return;
+    }
 
-      try {
-        setLoading(true);
+    setLoading(true);
 
-        if (currentUser.role === 'user') {
-          const postsQuery = query(
-            collection(db, 'posts'),
-            where('userId', '==', currentUser.uid)
-          );
+    if (currentUser.role === 'user') {
+      const postsQuery = query(
+        collection(db, 'posts'),
+        where('userId', '==', currentUser.uid)
+      );
 
-          const snapshot = await getDocs(postsQuery);
-
-          const posts = snapshot.docs.map(doc => ({
+      const unsubscribe = onSnapshot(
+        postsQuery,
+        (snapshot) => {
+          const posts = snapshot.docs.map((doc) => ({
             id: doc.id,
             ...doc.data(),
             bids: doc.data().bids || [],
@@ -60,19 +61,33 @@ export function MyProjectsPage() {
           );
 
           setUserPosts(posts);
-        } else if (currentUser.role === 'technician') {
-          const snapshot = await getDocs(collection(db, 'posts'));
+          setLoading(false);
+        },
+        (error) => {
+          console.error('Error loading projects:', error);
+          setLoading(false);
+        }
+      );
 
-          const allPosts = snapshot.docs.map(doc => ({
+      return () => unsubscribe();
+    }
+
+    if (currentUser.role === 'technician') {
+      const postsRef = collection(db, 'posts');
+
+      const unsubscribe = onSnapshot(
+        postsRef,
+        (snapshot) => {
+          const allPosts = snapshot.docs.map((doc) => ({
             id: doc.id,
             ...doc.data(),
             bids: doc.data().bids || [],
             images: doc.data().images || [],
           })) as WorkPost[];
 
-          const selectedPosts = allPosts.filter(post =>
+          const selectedPosts = allPosts.filter((post) =>
             post.bids.some(
-              bid => bid.technicianId === currentUser.uid && bid.isSelected
+              (bid) => bid.technicianId === currentUser.uid && bid.isSelected
             )
           );
 
@@ -82,15 +97,16 @@ export function MyProjectsPage() {
           );
 
           setWonBids(selectedPosts);
+          setLoading(false);
+        },
+        (error) => {
+          console.error('Error loading projects:', error);
+          setLoading(false);
         }
-      } catch (error) {
-        console.error('Error loading projects:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+      );
 
-    fetchProjects();
+      return () => unsubscribe();
+    }
   }, [currentUser]);
 
   if (!currentUser) return <Navigate to="/login" replace />;
@@ -106,8 +122,8 @@ export function MyProjectsPage() {
   /* ── CLIENT VIEW ── */
   if (currentUser.role === 'user') {
     const myPosts = userPosts;
-    const activePosts = myPosts.filter(p => p.status !== 'closed');
-    const completedPosts = myPosts.filter(p => p.status === 'closed');
+    const activePosts = myPosts.filter((p) => p.status !== 'closed');
+    const completedPosts = myPosts.filter((p) => p.status === 'closed');
     const displayed = tab === 'active' ? activePosts : completedPosts;
 
     return (
@@ -147,7 +163,7 @@ export function MyProjectsPage() {
 
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex border-b border-border mb-6">
-            {(['active', 'completed'] as const).map(t => (
+            {(['active', 'completed'] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -173,8 +189,8 @@ export function MyProjectsPage() {
             </div>
           ) : (
             <div className="space-y-5">
-              {displayed.map(post => {
-                const selectedBid = post.bids.find(b => b.isSelected);
+              {displayed.map((post) => {
+                const selectedBid = post.bids.find((b) => b.isSelected);
                 return (
                   <div key={post.id} className="bg-card border border-border rounded-xl overflow-hidden">
                     {post.images?.[0] && (
@@ -266,7 +282,7 @@ export function MyProjectsPage() {
   }
 
   /* ── TECHNICIAN VIEW ── */
-  const techData = mockTechnicians.find(t => t.id === currentUser.uid) || {
+  const techData = mockTechnicians.find((t) => t.id === currentUser.uid) || {
     id: currentUser.uid,
     name: currentUser.name,
     rating: currentUser.rating || 0,
@@ -306,8 +322,8 @@ export function MyProjectsPage() {
               🏆 Won Contracts on LabourX
             </h2>
             <div className="space-y-4">
-              {wonBids.map(post => {
-                const myBid = post.bids.find(b => b.technicianId === currentUser.uid && b.isSelected)!;
+              {wonBids.map((post) => {
+                const myBid = post.bids.find((b) => b.technicianId === currentUser.uid && b.isSelected)!;
                 return (
                   <div key={post.id} className="bg-card border border-green-200 dark:border-green-800 rounded-xl p-5">
                     <div className="flex items-start justify-between gap-3">

@@ -4,7 +4,7 @@ import {
   Star, CheckCircle, Send, AlertCircle, ChevronDown, ChevronUp, Edit
 } from 'lucide-react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import { Bid } from '../types';
@@ -37,18 +37,20 @@ export function PostDetailPage() {
   });
 
   useEffect(() => {
-    const fetchPost = async () => {
-      if (!id) {
-        setLoading(false);
-        return;
-      }
+    if (!id) {
+      setLoading(false);
+      setPost(null);
+      setBids([]);
+      return;
+    }
 
-      try {
-        setLoading(true);
+    setLoading(true);
 
-        const postRef = doc(db, 'posts', id);
-        const postSnap = await getDoc(postRef);
+    const postRef = doc(db, 'posts', id);
 
+    const unsubscribe = onSnapshot(
+      postRef,
+      (postSnap) => {
         if (postSnap.exists()) {
           const postData = {
             id: postSnap.id,
@@ -65,19 +67,27 @@ export function PostDetailPage() {
               (b: Bid) => b.technicianId === currentUser.uid
             );
             setBidSubmitted(alreadySubmitted);
+          } else {
+            setBidSubmitted(false);
           }
         } else {
           setPost(null);
+          setBids([]);
+          setBidSubmitted(false);
         }
-      } catch (error) {
+
+        setLoading(false);
+      },
+      (error) => {
         console.error('Error loading post:', error);
         setPost(null);
-      } finally {
+        setBids([]);
+        setBidSubmitted(false);
         setLoading(false);
       }
-    };
+    );
 
-    fetchPost();
+    return () => unsubscribe();
   }, [id, currentUser?.uid]);
 
   const currentTechnician = currentUser?.role === 'technician'
@@ -131,9 +141,6 @@ export function PostDetailPage() {
         bids: updatedBids,
       });
 
-      setBids(updatedBids);
-      setPost((prev: any) => prev ? { ...prev, bids: updatedBids } : prev);
-      setBidSubmitted(true);
       setShowBidForm(false);
       setBidForm({
         budget: '',
@@ -164,17 +171,6 @@ export function PostDetailPage() {
         bids: updatedBids,
         status: 'in-progress',
       });
-
-      setBids(updatedBids);
-      setPost((prev: any) =>
-        prev
-          ? {
-              ...prev,
-              bids: updatedBids,
-              status: 'in-progress',
-            }
-          : prev
-      );
     } catch (error) {
       console.error('Error selecting bid:', error);
       alert('Failed to select bid. Please try again.');
@@ -217,7 +213,11 @@ export function PostDetailPage() {
     <div className="min-h-screen bg-background">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Back */}
-        <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-muted-foreground hover:text-foreground text-sm mb-6 transition-colors" style={{ fontWeight: 500 }}>
+        <button
+          onClick={() => navigate('/posts')}
+          className="flex items-center gap-2 text-muted-foreground hover:text-foreground text-sm mb-6 transition-colors"
+          style={{ fontWeight: 500 }}
+        >
           <ArrowLeft className="w-4 h-4" /> Back to Posts
         </button>
 

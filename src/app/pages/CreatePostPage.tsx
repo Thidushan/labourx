@@ -7,6 +7,10 @@ import { SPECIALTIES } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { db, storage } from '../../firebase/config';
 
+const MAX_FILES = 5;
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
+
 export function CreatePostPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
@@ -51,36 +55,72 @@ export function CreatePostPage() {
     );
   }
 
-  const update = (field: string, value: string) => setForm(f => ({ ...f, [field]: value }));
+  const update = (field: string, value: string) => setForm((f) => ({ ...f, [field]: value }));
+
+  const validateFiles = (files: File[]) => {
+    for (const file of files) {
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        alert(`"${file.name}" is not a supported image type. Please upload PNG or JPG files only.`);
+        return false;
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        alert(`"${file.name}" is too large. Maximum size is 10MB per image.`);
+        return false;
+      }
+    }
+
+    return true;
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const newFiles = Array.from(e.target.files).slice(0, 5 - selectedFiles.length);
-      setSelectedFiles(prev => [...prev, ...newFiles].slice(0, 5));
+    const incoming = e.target.files ? Array.from(e.target.files) : [];
+
+    if (incoming.length === 0) return;
+
+    if (!validateFiles(incoming)) {
+      e.target.value = '';
+      return;
     }
+
+    const remainingSlots = MAX_FILES - selectedFiles.length;
+
+    if (remainingSlots <= 0) {
+      alert(`You can upload a maximum of ${MAX_FILES} images.`);
+      e.target.value = '';
+      return;
+    }
+
+    const nextFiles = incoming.slice(0, remainingSlots);
+
+    setSelectedFiles((prev) => [...prev, ...nextFiles]);
+
+    if (incoming.length > remainingSlots) {
+      alert(`Only ${MAX_FILES} images are allowed. Extra files were ignored.`);
+    }
+
+    e.target.value = '';
   };
 
   const removeFile = (index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const uploadImages = async () => {
     if (selectedFiles.length === 0) return [];
 
-    const imageUrls: string[] = [];
-
-    for (const file of selectedFiles) {
+    const uploadPromises = selectedFiles.map(async (file, index) => {
+      const safeName = file.name.replace(/\s+/g, '-');
       const fileRef = ref(
         storage,
-        `posts/${currentUser.uid}/${Date.now()}-${file.name}`
+        `posts/${currentUser.uid}/${Date.now()}-${index}-${safeName}`
       );
 
       await uploadBytes(fileRef, file);
-      const downloadUrl = await getDownloadURL(fileRef);
-      imageUrls.push(downloadUrl);
-    }
+      return getDownloadURL(fileRef);
+    });
 
-    return imageUrls;
+    return Promise.all(uploadPromises);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -88,6 +128,11 @@ export function CreatePostPage() {
 
     if (Number(form.budgetMin) > Number(form.budgetMax)) {
       alert('Minimum budget cannot be greater than maximum budget.');
+      return;
+    }
+
+    if (selectedFiles.length > MAX_FILES) {
+      alert(`You can upload a maximum of ${MAX_FILES} images.`);
       return;
     }
 
@@ -100,7 +145,7 @@ export function CreatePostPage() {
         title: form.title.trim(),
         description: form.description.trim(),
         category: form.category,
-        location: `${form.location}, ${form.city}`,
+        location: `${form.location.trim()}, ${form.city.trim()}`,
         area: form.location.trim(),
         city: form.city.trim(),
         budgetMin: Number(form.budgetMin),
@@ -119,9 +164,14 @@ export function CreatePostPage() {
       });
 
       setSubmitted(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating post:', error);
-      alert('Failed to publish post. Please try again.');
+
+      if (error?.code?.includes('storage')) {
+        alert('Image upload failed. Please check Firebase Storage rules and try again.');
+      } else {
+        alert('Failed to publish post. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -151,7 +201,6 @@ export function CreatePostPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <div className="bg-maroon py-8">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
           <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-white/70 hover:text-white text-sm mb-3 transition-colors" style={{ fontWeight: 500 }}>
@@ -164,7 +213,6 @@ export function CreatePostPage() {
 
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Basic Info */}
           <div className="bg-card border border-border rounded-xl p-6">
             <div className="flex items-center gap-2 mb-5">
               <FileText className="w-5 h-5 text-maroon" />
@@ -208,7 +256,6 @@ export function CreatePostPage() {
             </div>
           </div>
 
-          {/* Location */}
           <div className="bg-card border border-border rounded-xl p-6">
             <div className="flex items-center gap-2 mb-5">
               <MapPin className="w-5 h-5 text-maroon" />
@@ -240,7 +287,6 @@ export function CreatePostPage() {
             </div>
           </div>
 
-          {/* Budget & Timeline */}
           <div className="bg-card border border-border rounded-xl p-6">
             <div className="flex items-center gap-2 mb-5">
               <DollarSign className="w-5 h-5 text-gold" />
@@ -288,7 +334,6 @@ export function CreatePostPage() {
             </div>
           </div>
 
-          {/* Images (placeholder) */}
           <div className="bg-card border border-border rounded-xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <Image className="w-5 h-5 text-maroon" />
@@ -341,7 +386,6 @@ export function CreatePostPage() {
             )}
           </div>
 
-          {/* Submit */}
           <div className="flex gap-3">
             <button
               type="submit"
