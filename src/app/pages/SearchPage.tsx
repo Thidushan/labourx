@@ -74,8 +74,8 @@ export function SearchPage() {
               email: data.email || '',
               phone: data.phone || '',
               specialty: data.specialty || 'Professional',
-              location: data.location || data.city || '',
-              city: data.city || data.location || '',
+              location: data.locationText || data.location || data.city || '',
+              city: data.city || '',
               avatar: data.avatar || data.photoURL || '',
               role: data.role || '',
               bio: data.bio || '',
@@ -93,6 +93,9 @@ export function SearchPage() {
               joinedAt: data.joinedAt || '',
               isVerified: Boolean(data.isVerified || false),
               website: data.website || '',
+              locationText: data.locationText || '',
+              lat: typeof data.lat === 'number' ? data.lat : Number(data.lat || 0),
+              lng: typeof data.lng === 'number' ? data.lng : Number(data.lng || 0),
             } as Technician;
           })
           .filter((user) => normalize((user as any).role) === 'technician');
@@ -134,6 +137,7 @@ export function SearchPage() {
           normalize(t.specialty).includes(q) ||
           normalize(t.city).includes(q) ||
           normalize((t as any).location).includes(q) ||
+          normalize((t as any).locationText).includes(q) ||
           normalize(t.bio).includes(q) ||
           skills.some((skill) => normalize(skill).includes(q))
         );
@@ -145,19 +149,23 @@ export function SearchPage() {
 
       filtered = filtered.filter((t) => {
         const techSpecialty = normalize(t.specialty);
-        return (
-          techSpecialty === specialtyQuery ||
-          techSpecialty.includes(specialtyQuery)
-        );
+        return techSpecialty === specialtyQuery || techSpecialty.includes(specialtyQuery);
       });
     }
 
     if (selectedCity && selectedCity !== 'All Cities') {
-      filtered = filtered.filter(
-        (t) =>
-          normalize(t.city) === normalize(selectedCity) ||
-          normalize((t as any).location) === normalize(selectedCity)
-      );
+      filtered = filtered.filter((t) => {
+        const cityValue = normalize(t.city);
+        const locationValue = normalize((t as any).location);
+        const locationTextValue = normalize((t as any).locationText);
+        const selectedCityValue = normalize(selectedCity);
+
+        return (
+          cityValue === selectedCityValue ||
+          locationValue === selectedCityValue ||
+          locationTextValue.includes(selectedCityValue)
+        );
+      });
     }
 
     if (minRating > 0) {

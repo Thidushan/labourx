@@ -14,6 +14,7 @@ import {
 
 import { SPECIALTIES } from '../types';
 import { registerUser } from '../../firebase/authService';
+import { LocationPicker } from '../components/LocationPicker';
 
 type Role = 'user' | 'technician';
 
@@ -28,6 +29,9 @@ interface RegisterForm {
   specialty: string;
   yearsExperience: string;
   bio: string;
+  locationText: string;
+  lat: string;
+  lng: string;
 }
 
 export function RegisterPage() {
@@ -48,14 +52,27 @@ export function RegisterPage() {
     specialty: '',
     yearsExperience: '',
     bio: '',
+    locationText: '',
+    lat: '',
+    lng: '',
   });
 
   const update = (field: keyof RegisterForm, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleLocationChange = (lat: number, lng: number, address: string) => {
+    setForm((prev) => ({
+      ...prev,
+      city: address,
+      locationText: address,
+      lat: String(lat),
+      lng: String(lng),
+    }));
+  };
+
   const validateStepTwo = () => {
-    if (!form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.city.trim()) {
+    if (!form.name.trim() || !form.email.trim() || !form.phone.trim()) {
       alert('Please fill all required fields');
       return false;
     }
@@ -67,6 +84,11 @@ export function RegisterPage() {
 
     if (form.age && Number(form.age) < 1) {
       alert('Please enter a valid age');
+      return false;
+    }
+
+    if (!form.locationText.trim() || !form.lat.trim() || !form.lng.trim()) {
+      alert('Please search and select a location');
       return false;
     }
 
@@ -122,6 +144,9 @@ export function RegisterPage() {
         bio: form.bio.trim(),
         age: form.age.trim(),
         yearsExperience: form.yearsExperience.trim(),
+        locationText: form.locationText.trim(),
+        lat: Number(form.lat),
+        lng: Number(form.lng),
       };
 
       await registerUser(role, payload);
@@ -282,30 +307,32 @@ export function RegisterPage() {
               </div>
 
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelClass}>Full Name *</label>
-                    <input
-                      type="text"
-                      value={form.name}
-                      onChange={(e) => update('name', e.target.value)}
-                      placeholder="John Doe"
-                      className={inputClass}
-                      required
-                    />
-                  </div>
+                <div>
+                  <label className={labelClass}>Full Name *</label>
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={(e) => update('name', e.target.value)}
+                    placeholder="John Doe"
+                    className={inputClass}
+                    required
+                  />
+                </div>
 
-                  <div>
-                    <label className={labelClass}>City *</label>
-                    <input
-                      type="text"
-                      value={form.city}
-                      onChange={(e) => update('city', e.target.value)}
-                      placeholder="Colombo"
-                      className={inputClass}
-                      required
-                    />
-                  </div>
+                <div>
+                  <label className={labelClass}>
+                    {role === 'technician' ? 'Service Location *' : 'Location *'}
+                  </label>
+                  <LocationPicker
+                    onLocationChange={handleLocationChange}
+                    initialAddress={form.locationText}
+                    compact={false}
+                  />
+                  {form.locationText && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Selected: {form.locationText}
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -416,6 +443,13 @@ export function RegisterPage() {
               </div>
 
               <div className="space-y-4">
+                <div>
+                  <label className={labelClass}>Selected Service Location</label>
+                  <div className="w-full px-4 py-2.5 rounded-lg border border-border bg-input-background text-foreground text-sm">
+                    {form.locationText || 'No location selected'}
+                  </div>
+                </div>
+
                 <div>
                   <label className={labelClass}>Specialty / Trade *</label>
                   <select

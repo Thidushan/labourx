@@ -39,9 +39,7 @@ export const router = createBrowserRouter([
       { path: 'search', element: <SearchPage /> },
       { path: 'technician/:id', element: <TechnicianProfilePage /> },
       { path: 'posts', element: <PostsPage /> },
-      { path: 'posts/create', element: <CreatePostPage /> },
       { path: 'posts/:id', element: <PostDetailPage /> },
-      { path: 'posts/:id/edit', element: <EditPostPage /> },
 
       {
         element: <ProtectedRoute />,
@@ -50,6 +48,8 @@ export const router = createBrowserRouter([
           { path: 'profile', element: <ProfilePage /> },
           { path: 'my-projects', element: <MyProjectsPage /> },
           { path: 'nearby', element: <NearbyMapPage /> },
+          { path: 'posts/create', element: <CreatePostPage /> },
+          { path: 'posts/:id/edit', element: <EditPostPage /> },
         ],
       },
 
