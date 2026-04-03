@@ -4,7 +4,7 @@ import { Footer } from './components/Footer';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 import { HomePage } from './pages/HomePage';
-import { LoginPage } from './pages/LoginPage';
+import { LoginPage } from './pages/LogInPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { SearchPage } from './pages/SearchPage';
 import { TechnicianProfilePage } from './pages/TechnicianProfilePage';

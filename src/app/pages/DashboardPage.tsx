@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Star,
@@ -15,8 +16,10 @@ import {
   Edit,
   UserCircle2,
 } from 'lucide-react';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 
 import { useAuth } from '../context/AuthContext';
+import { db } from '../../firebase/config';
 
 type AppUser = {
   id?: string;
@@ -32,6 +35,44 @@ type AppUser = {
   bio?: string;
   phone?: string;
   photoURL?: string;
+  avatar?: string;
+  rating?: number;
+  totalReviews?: number;
+  completedProjects?: number;
+};
+
+type Bid = {
+  id: string;
+  technicianId: string;
+  technicianName: string;
+  technicianAvatar?: string;
+  technicianSpecialty: string;
+  technicianRating: number;
+  description: string;
+  budget: number;
+  timeline: string;
+  approach: string;
+  submittedAt: string;
+  isSelected?: boolean;
+};
+
+type WorkPost = {
+  id: string;
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  userCity: string;
+  title: string;
+  description: string;
+  category: string;
+  location: string;
+  budgetMin: number;
+  budgetMax: number;
+  timeline: string;
+  postedAt: string;
+  status: 'open' | 'in-progress' | 'closed';
+  bids: Bid[];
+  images?: string[];
 };
 
 export function DashboardPage() {
@@ -45,7 +86,13 @@ export function DashboardPage() {
     );
   }
 
-  if (!user) return null;
+    if (!user) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">User not found. Please sign in again.</p>
+      </div>
+    );
+  }
 
   if (user.role === 'technician') {
     return <TechnicianDashboard user={user as AppUser} />;
@@ -57,36 +104,108 @@ export function DashboardPage() {
 function TechnicianDashboard({ user }: { user: AppUser }) {
   const profileCompletion = getTechnicianProfileCompletion(user);
 
-  const stats = [
-    {
-      icon: Eye,
-      label: 'Profile Views',
-      value: '0',
-      change: 'Will update when users visit your profile',
-      color: 'text-blue-500',
-    },
-    {
-      icon: Star,
-      label: 'Average Rating',
-      value: '0.0',
-      change: 'No reviews yet',
-      color: 'text-gold',
-    },
-    {
-      icon: Briefcase,
-      label: 'Projects Done',
-      value: '0',
-      change: 'No completed projects yet',
-      color: 'text-green-500',
-    },
-    {
-      icon: MessageSquare,
-      label: 'Active Bids',
-      value: '0',
-      change: 'No bids submitted yet',
-      color: 'text-maroon',
-    },
-  ];
+  const [loadingData, setLoadingData] = useState(true);
+  const [activeBids, setActiveBids] = useState<WorkPost[]>([]);
+  const [recentReviews, setRecentReviews] = useState<any[]>([]);
+
+    useEffect(() => {
+    const fetchTechnicianDashboardData = async () => {
+      if (!user.uid) {
+        setLoadingData(false);
+        return;
+      }
+
+      try {
+        setLoadingData(true);
+
+        const postsSnapshot = await getDocs(collection(db, 'posts'));
+
+        const allPosts = postsSnapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+
+          return {
+            id: docSnap.id,
+            ...data,
+            bids: Array.isArray(data.bids) ? data.bids : [],
+            images: Array.isArray(data.images) ? data.images : [],
+          };
+        }) as WorkPost[];
+
+        const myActiveBids = allPosts.filter((post) =>
+          post.bids.some((bid) => bid.technicianId === user.uid)
+        );
+
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDocSnap = await getDoc(userDocRef);
+
+        let reviews: any[] = [];
+        if (userDocSnap.exists()) {
+          const userData = userDocSnap.data();
+          reviews = Array.isArray(userData.reviews) ? userData.reviews : [];
+        }
+
+        reviews.sort(
+          (a, b) =>
+            new Date(b.date || b.submittedAt || 0).getTime() -
+            new Date(a.date || a.submittedAt || 0).getTime()
+        );
+
+        setActiveBids(myActiveBids);
+        setRecentReviews(reviews.slice(0, 3));
+      } catch (error) {
+        console.error('Error loading technician dashboard:', error);
+        setActiveBids([]);
+        setRecentReviews([]);
+      } finally {
+        setLoadingData(false);
+      }
+    };
+
+    fetchTechnicianDashboardData();
+  }, [user.uid]);
+
+  const stats = useMemo(
+    () => [
+      {
+        icon: Eye,
+        label: 'Profile Views',
+        value: '0',
+        change: 'Will update when users visit your profile',
+        color: 'text-blue-500',
+      },
+      {
+        icon: Star,
+        label: 'Average Rating',
+        value: Number(user.rating || 0).toFixed(1),
+        change:
+          Number(user.totalReviews || 0) > 0
+            ? `${user.totalReviews} review${Number(user.totalReviews) === 1 ? '' : 's'} received`
+            : 'No reviews yet',
+        color: 'text-gold',
+      },
+      {
+        icon: Briefcase,
+        label: 'Projects Done',
+        value: String(Number(user.completedProjects || 0)),
+        change:
+          Number(user.completedProjects || 0) > 0
+            ? 'Completed projects on your profile'
+            : 'No completed projects yet',
+        color: 'text-green-500',
+      },
+      {
+        icon: MessageSquare,
+        label: 'Active Bids',
+        value: String(activeBids.length),
+        change:
+          activeBids.length > 0
+            ? 'Bids currently waiting for selection'
+            : 'No bids submitted yet',
+        color: 'text-maroon',
+      },
+    ],
+    [user.rating, user.totalReviews, user.completedProjects, activeBids.length]
+  );
 
   const checklist = [
     { label: 'Full name added', done: !!user.name },
@@ -104,9 +223,9 @@ function TechnicianDashboard({ user }: { user: AppUser }) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
             <div className="relative">
-              {user.photoURL ? (
+              {user.photoURL || user.avatar ? (
                 <img
-                  src={user.photoURL}
+                  src={user.photoURL || user.avatar}
                   alt={user.name || 'User'}
                   className="w-20 h-20 rounded-2xl object-cover border-4 border-white/20"
                 />
@@ -147,9 +266,11 @@ function TechnicianDashboard({ user }: { user: AppUser }) {
               <div className="flex items-center gap-1 mt-1">
                 <Star className="w-4 h-4 fill-gold text-gold" />
                 <span className="text-white" style={{ fontWeight: 600 }}>
-                  0.0
+                  {Number(user.rating || 0).toFixed(1)}
                 </span>
-                <span className="text-white/70 text-sm">(0 reviews)</span>
+                <span className="text-white/70 text-sm">
+                  ({Number(user.totalReviews || 0)} reviews)
+                </span>
               </div>
             </div>
 
@@ -188,13 +309,13 @@ function TechnicianDashboard({ user }: { user: AppUser }) {
                 className="text-foreground"
                 style={{ fontSize: '1.5rem', fontWeight: 700 }}
               >
-                {stat.value}
+                {loadingData ? '...' : stat.value}
               </p>
               <p className="text-foreground text-sm" style={{ fontWeight: 500 }}>
                 {stat.label}
               </p>
               <p className="text-muted-foreground text-xs mt-0.5">
-                {stat.change}
+                {loadingData ? 'Loading...' : stat.change}
               </p>
             </div>
           ))}
@@ -218,22 +339,61 @@ function TechnicianDashboard({ user }: { user: AppUser }) {
                 </Link>
               </div>
 
-              <div className="text-center py-10">
-                <Briefcase className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                <p className="text-muted-foreground text-sm mb-2">
-                  You have not submitted any bids yet
-                </p>
-                <p className="text-muted-foreground text-xs mb-4">
-                  Start applying for projects to see them here
-                </p>
-                <Link
-                  to="/posts"
-                  className="bg-maroon text-white px-4 py-2 rounded-lg text-sm hover:bg-maroon-dark transition-colors"
-                  style={{ fontWeight: 500 }}
-                >
-                  Browse Available Jobs
-                </Link>
-              </div>
+              {loadingData ? (
+                <div className="text-center py-10">
+                  <Briefcase className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm mb-2">Loading bids...</p>
+                </div>
+              ) : activeBids.length === 0 ? (
+                <div className="text-center py-10">
+                  <Briefcase className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm mb-2">
+                    You have not submitted any bids yet
+                  </p>
+                  <p className="text-muted-foreground text-xs mb-4">
+                    Start applying for projects to see them here
+                  </p>
+                  <Link
+                    to="/posts"
+                    className="bg-maroon text-white px-4 py-2 rounded-lg text-sm hover:bg-maroon-dark transition-colors"
+                    style={{ fontWeight: 500 }}
+                  >
+                    Browse Available Jobs
+                  </Link>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {activeBids.slice(0, 3).map((post) => {
+                    const myBid = post.bids.find((b) => b.technicianId === user.uid);
+                    return (
+                      <div key={post.id} className="border border-border rounded-xl p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <h3 className="text-foreground text-sm" style={{ fontWeight: 600 }}>
+                              {post.title}
+                            </h3>
+                            <p className="text-muted-foreground text-xs mt-1 line-clamp-2">
+                              {post.description}
+                            </p>
+                            <div className="mt-2 text-xs text-muted-foreground flex flex-wrap gap-3">
+                              <span>{post.location}</span>
+                              {myBid?.budget ? <span>Rs. {myBid.budget}</span> : null}
+                              {myBid?.timeline ? <span>{myBid.timeline}</span> : null}
+                            </div>
+                          </div>
+                          <Link
+                            to={`/posts/${post.id}`}
+                            className="text-sm text-maroon hover:underline flex items-center gap-1"
+                            style={{ fontWeight: 500 }}
+                          >
+                            View <ArrowRight className="w-3.5 h-3.5" />
+                          </Link>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Reviews */}
@@ -251,15 +411,38 @@ function TechnicianDashboard({ user }: { user: AppUser }) {
                 </Link>
               </div>
 
-              <div className="text-center py-10">
-                <Star className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                <p className="text-muted-foreground text-sm mb-2">
-                  No reviews yet
-                </p>
-                <p className="text-muted-foreground text-xs">
-                  Reviews from completed jobs will appear here
-                </p>
-              </div>
+              {loadingData ? (
+                <div className="text-center py-10">
+                  <Star className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm mb-2">Loading reviews...</p>
+                </div>
+              ) : recentReviews.length === 0 ? (
+                <div className="text-center py-10">
+                  <Star className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm mb-2">
+                    No reviews yet
+                  </p>
+                  <p className="text-muted-foreground text-xs">
+                    Reviews from completed jobs will appear here
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {recentReviews.map((review) => (
+                    <div key={review.id} className="border border-border rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-foreground text-sm" style={{ fontWeight: 600 }}>
+                          {review.userName}
+                        </span>
+                        <span className="text-muted-foreground text-xs">
+                          {review.projectType}
+                        </span>
+                      </div>
+                      <p className="text-muted-foreground text-sm">{review.comment}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -394,33 +577,106 @@ function TechnicianDashboard({ user }: { user: AppUser }) {
 function UserDashboard({ user }: { user: AppUser }) {
   const profileCompletion = getUserProfileCompletion(user);
 
+  const [loadingData, setLoadingData] = useState(true);
+  const [myPosts, setMyPosts] = useState<WorkPost[]>([]);
+  const [recentActivityPosts, setRecentActivityPosts] = useState<WorkPost[]>([]);
+  const [reviewsGivenCount, setReviewsGivenCount] = useState(0);
+
+    useEffect(() => {
+    const fetchUserDashboardData = async () => {
+      if (!user.uid) {
+        setLoadingData(false);
+        return;
+      }
+
+      try {
+        setLoadingData(true);
+
+        const postsSnapshot = await getDocs(
+          query(collection(db, 'posts'), where('userId', '==', user.uid))
+        );
+
+        const posts = postsSnapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+
+          return {
+            id: docSnap.id,
+            ...data,
+            bids: Array.isArray(data.bids) ? data.bids : [],
+            images: Array.isArray(data.images) ? data.images : [],
+          };
+        }) as WorkPost[];
+
+        posts.sort(
+          (a, b) =>
+            new Date(b.postedAt || 0).getTime() -
+            new Date(a.postedAt || 0).getTime()
+        );
+
+        let totalReviewsGiven = 0;
+
+        const techniciansSnapshot = await getDocs(
+          query(collection(db, 'users'), where('role', '==', 'technician'))
+        );
+
+        techniciansSnapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          const reviews = Array.isArray(data.reviews) ? data.reviews : [];
+
+          totalReviewsGiven += reviews.filter(
+            (review: any) => review.userId === user.uid
+          ).length;
+        });
+
+        setMyPosts(posts);
+        setRecentActivityPosts(posts.slice(0, 3));
+        setReviewsGivenCount(totalReviewsGiven);
+      } catch (error) {
+        console.error('Error loading user dashboard:', error);
+        setMyPosts([]);
+        setRecentActivityPosts([]);
+        setReviewsGivenCount(0);
+      } finally {
+        setLoadingData(false);
+      }
+    };
+
+    fetchUserDashboardData();
+  }, [user.uid]);
+
+  const totalBidsReceived = myPosts.reduce(
+    (sum, post) => sum + (Array.isArray(post.bids) ? post.bids.length : 0),
+    0
+  );
+  const completedProjects = myPosts.filter((post) => post.status === 'closed').length;
+
   const stats = [
     {
       icon: FileText,
       label: 'Posted Jobs',
-      value: '0',
-      change: 'No jobs posted yet',
+      value: String(myPosts.length),
+      change: myPosts.length > 0 ? 'Jobs you created on LabourX' : 'No jobs posted yet',
       color: 'text-maroon',
     },
     {
       icon: Users,
       label: 'Total Bids Received',
-      value: '0',
-      change: 'No bids yet',
+      value: String(totalBidsReceived),
+      change: totalBidsReceived > 0 ? 'Across all your job posts' : 'No bids yet',
       color: 'text-blue-500',
     },
     {
       icon: CheckCircle,
       label: 'Projects Done',
-      value: '0',
-      change: 'No completed projects',
+      value: String(completedProjects),
+      change: completedProjects > 0 ? 'Completed client projects' : 'No completed projects',
       color: 'text-green-500',
     },
     {
       icon: Star,
       label: 'Reviews Given',
-      value: '0',
-      change: 'No reviews submitted',
+      value: String(reviewsGivenCount),
+      change: reviewsGivenCount > 0 ? 'Reviews you submitted' : 'No reviews submitted',
       color: 'text-gold',
     },
   ];
@@ -484,13 +740,13 @@ function UserDashboard({ user }: { user: AppUser }) {
                 className="text-foreground"
                 style={{ fontSize: '1.5rem', fontWeight: 700 }}
               >
-                {stat.value}
+                {loadingData ? '...' : stat.value}
               </p>
               <p className="text-foreground text-sm" style={{ fontWeight: 500 }}>
                 {stat.label}
               </p>
               <p className="text-muted-foreground text-xs mt-0.5">
-                {stat.change}
+                {loadingData ? 'Loading...' : stat.change}
               </p>
             </div>
           ))}
@@ -514,22 +770,60 @@ function UserDashboard({ user }: { user: AppUser }) {
                 </Link>
               </div>
 
-              <div className="text-center py-10">
-                <FileText className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                <p className="text-muted-foreground text-sm mb-2">
-                  You haven&apos;t posted any jobs yet
-                </p>
-                <p className="text-muted-foreground text-xs mb-4">
-                  Create your first job post to start getting bids
-                </p>
-                <Link
-                  to="/posts/create"
-                  className="bg-maroon text-white px-4 py-2 rounded-lg text-sm hover:bg-maroon-dark transition-colors"
-                  style={{ fontWeight: 500 }}
-                >
-                  Create First Job
-                </Link>
-              </div>
+              {loadingData ? (
+                <div className="text-center py-10">
+                  <FileText className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm mb-2">
+                    Loading your jobs...
+                  </p>
+                </div>
+              ) : myPosts.length === 0 ? (
+                <div className="text-center py-10">
+                  <FileText className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm mb-2">
+                    You haven&apos;t posted any jobs yet
+                  </p>
+                  <p className="text-muted-foreground text-xs mb-4">
+                    Create your first job post to start getting bids
+                  </p>
+                  <Link
+                    to="/posts/create"
+                    className="bg-maroon text-white px-4 py-2 rounded-lg text-sm hover:bg-maroon-dark transition-colors"
+                    style={{ fontWeight: 500 }}
+                  >
+                    Create First Job
+                  </Link>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {myPosts.slice(0, 3).map((post) => (
+                    <div key={post.id} className="border border-border rounded-xl p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="text-foreground text-sm" style={{ fontWeight: 600 }}>
+                            {post.title}
+                          </h3>
+                          <p className="text-muted-foreground text-xs mt-1 line-clamp-2">
+                            {post.description}
+                          </p>
+                          <div className="mt-2 text-xs text-muted-foreground flex flex-wrap gap-3">
+                            <span>{post.location}</span>
+                            <span>{post.status}</span>
+                            <span>{post.bids.length} bids</span>
+                          </div>
+                        </div>
+                        <Link
+                          to={`/posts/${post.id}`}
+                          className="text-sm text-maroon hover:underline flex items-center gap-1"
+                          style={{ fontWeight: 500 }}
+                        >
+                          View <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Recent activity */}
@@ -547,15 +841,46 @@ function UserDashboard({ user }: { user: AppUser }) {
                 </Link>
               </div>
 
-              <div className="text-center py-10">
-                <Users className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                <p className="text-muted-foreground text-sm mb-2">
-                  No activity yet
-                </p>
-                <p className="text-muted-foreground text-xs">
-                  When you post jobs and receive bids, they will appear here
-                </p>
-              </div>
+              {loadingData ? (
+                <div className="text-center py-10">
+                  <Users className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm mb-2">Loading activity...</p>
+                </div>
+              ) : recentActivityPosts.length === 0 ? (
+                <div className="text-center py-10">
+                  <Users className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm mb-2">
+                    No activity yet
+                  </p>
+                  <p className="text-muted-foreground text-xs">
+                    When you post jobs and receive bids, they will appear here
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {recentActivityPosts.map((post) => (
+                    <div key={post.id} className="border border-border rounded-xl p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="text-foreground text-sm" style={{ fontWeight: 600 }}>
+                            {post.title}
+                          </h3>
+                          <p className="text-muted-foreground text-xs mt-1">
+                            {post.bids.length} bid{post.bids.length === 1 ? '' : 's'} received
+                          </p>
+                        </div>
+                        <Link
+                          to={`/posts/${post.id}`}
+                          className="text-sm text-maroon hover:underline flex items-center gap-1"
+                          style={{ fontWeight: 500 }}
+                        >
+                          Open <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -721,7 +1046,11 @@ function getTechnicianProfileCompletion(user: AppUser) {
     user.bio,
   ];
 
-  const completed = fields.filter(Boolean).length;
+  const completed = fields.filter((value) => {
+    if (typeof value === 'number') return value > 0;
+    return !!String(value || '').trim();
+  }).length;
+
   return Math.round((completed / fields.length) * 100);
 }
 
@@ -735,6 +1064,10 @@ function getUserProfileCompletion(user: AppUser) {
     user.age,
   ];
 
-  const completed = fields.filter(Boolean).length;
+  const completed = fields.filter((value) => {
+    if (typeof value === 'number') return value > 0;
+    return !!String(value || '').trim();
+  }).length;
+
   return Math.round((completed / fields.length) * 100);
 }

@@ -10,8 +10,9 @@ import {
   ArrowLeft
 } from 'lucide-react';
 
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../../firebase/config';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../../firebase/config';
 
 export function LoginPage() {
   const [role, setRole] = useState<'user' | 'technician'>('user');
@@ -23,14 +24,15 @@ export function LoginPage() {
 
   const navigate = useNavigate();
 
-  // ✅ FINAL LOGIN FUNCTION
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     setError('');
 
-    // 🔥 BASIC VALIDATION
-    if (!email || !password) {
+    const cleanedEmail = email.trim().toLowerCase();
+    const cleanedPassword = password.trim();
+
+    if (!cleanedEmail || !cleanedPassword) {
       setError('Please enter your email and password.');
       return;
     }
@@ -38,22 +40,56 @@ export function LoginPage() {
     setLoading(true);
 
     try {
-      // 🔥 Firebase login
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(
+        auth,
+        cleanedEmail,
+        cleanedPassword
+      );
 
-      // ✅ AuthContext will automatically update
+      const firebaseUser = userCredential.user;
+
+      const userRef = doc(db, 'users', firebaseUser.uid);
+      const userSnap = await getDoc(userRef);
+
+      if (!userSnap.exists()) {
+        await signOut(auth);
+        setError('User profile not found. Please contact support or register again.');
+        return;
+      }
+
+      const userData = userSnap.data();
+      const actualRole = userData.role as 'user' | 'technician' | undefined;
+
+      if (!actualRole) {
+        await signOut(auth);
+        setError('User role is missing. Please contact support.');
+        return;
+      }
+
+      if (actualRole !== role) {
+        await signOut(auth);
+        setError(
+          `This account is registered as ${
+            actualRole === 'user' ? 'Client' : 'Professional'
+          }. Please select the correct role and try again.`
+        );
+        return;
+      }
+
       navigate('/dashboard');
-
     } catch (err: any) {
       console.error(err);
 
-      // 🔥 USER-FRIENDLY ERRORS
       if (err.code === 'auth/user-not-found') {
         setError('No account found with this email.');
       } else if (err.code === 'auth/wrong-password') {
         setError('Incorrect password.');
       } else if (err.code === 'auth/invalid-email') {
         setError('Invalid email address.');
+      } else if (err.code === 'auth/invalid-credential') {
+        setError('Incorrect email or password.');
+      } else if (err.code === 'auth/too-many-requests') {
+        setError('Too many failed attempts. Please try again later.');
       } else {
         setError('Login failed. Please try again.');
       }

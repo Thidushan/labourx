@@ -1,8 +1,11 @@
 import { useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, FileText, MapPin, DollarSign, Clock, Tag, Image, CheckCircle, X } from 'lucide-react';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { SPECIALTIES } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { db, storage } from '../../firebase/config';
 
 export function CreatePostPage() {
   const { currentUser } = useAuth();
@@ -50,12 +53,78 @@ export function CreatePostPage() {
 
   const update = (field: string, value: string) => setForm(f => ({ ...f, [field]: value }));
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const newFiles = Array.from(e.target.files).slice(0, 5 - selectedFiles.length);
+      setSelectedFiles(prev => [...prev, ...newFiles].slice(0, 5));
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const uploadImages = async () => {
+    if (selectedFiles.length === 0) return [];
+
+    const imageUrls: string[] = [];
+
+    for (const file of selectedFiles) {
+      const fileRef = ref(
+        storage,
+        `posts/${currentUser.uid}/${Date.now()}-${file.name}`
+      );
+
+      await uploadBytes(fileRef, file);
+      const downloadUrl = await getDownloadURL(fileRef);
+      imageUrls.push(downloadUrl);
+    }
+
+    return imageUrls;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setLoading(false);
-    setSubmitted(true);
+
+    if (Number(form.budgetMin) > Number(form.budgetMax)) {
+      alert('Minimum budget cannot be greater than maximum budget.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const imageUrls = await uploadImages();
+
+      await addDoc(collection(db, 'posts'), {
+        title: form.title.trim(),
+        description: form.description.trim(),
+        category: form.category,
+        location: `${form.location}, ${form.city}`,
+        area: form.location.trim(),
+        city: form.city.trim(),
+        budgetMin: Number(form.budgetMin),
+        budgetMax: Number(form.budgetMax),
+        timeline: form.timeline.trim(),
+        images: imageUrls,
+        status: 'open',
+        userId: currentUser.uid,
+        userName: currentUser.name,
+        userEmail: currentUser.email,
+        userCity: currentUser.city || form.city.trim(),
+        userAvatar: currentUser.avatar || currentUser.photoURL || '',
+        bids: [],
+        postedAt: new Date().toISOString(),
+        createdAt: serverTimestamp(),
+      });
+
+      setSubmitted(true);
+    } catch (error) {
+      console.error('Error creating post:', error);
+      alert('Failed to publish post. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (submitted) {
@@ -76,17 +145,6 @@ export function CreatePostPage() {
       </div>
     );
   }
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const newFiles = Array.from(e.target.files).slice(0, 5 - selectedFiles.length);
-      setSelectedFiles(prev => [...prev, ...newFiles].slice(0, 5));
-    }
-  };
-
-  const removeFile = (index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-  };
 
   const inputClass = "w-full px-4 py-2.5 rounded-lg border border-border bg-input-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-maroon/30 focus:border-maroon transition-colors text-sm";
   const labelClass = "block text-sm text-foreground mb-1.5";
@@ -237,7 +295,6 @@ export function CreatePostPage() {
               <h2 className="text-foreground" style={{ fontWeight: 600 }}>Reference Images (Optional)</h2>
             </div>
 
-            {/* Hidden file input */}
             <input
               ref={fileInputRef}
               type="file"
@@ -261,7 +318,6 @@ export function CreatePostPage() {
               <p className="text-xs text-muted-foreground mt-1">PNG, JPG up to 10MB each (max 5 images)</p>
             </div>
 
-            {/* Preview selected files */}
             {selectedFiles.length > 0 && (
               <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {selectedFiles.map((file, i) => (

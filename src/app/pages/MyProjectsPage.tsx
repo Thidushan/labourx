@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import {
   Briefcase, MapPin, DollarSign, Clock, Users, CheckCircle,
   Tag, Edit, Eye, Star, Calendar, ArrowRight, FolderOpen
 } from 'lucide-react';
-import { mockWorkPosts, mockTechnicians } from '../data/mockData';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../../firebase/config';
+import { mockTechnicians } from '../data/mockData';
 import { useAuth } from '../context/AuthContext';
+import { WorkPost } from '../types';
 
 function formatCurrency(amount: number) {
   if (amount >= 1000000) return `Rs. ${(amount / 1000000).toFixed(1)} Mn`;
@@ -22,12 +25,87 @@ const statusColors: Record<string, string> = {
 export function MyProjectsPage() {
   const { currentUser } = useAuth();
   const [tab, setTab] = useState<'active' | 'completed'>('active');
+  const [loading, setLoading] = useState(true);
+  const [userPosts, setUserPosts] = useState<WorkPost[]>([]);
+  const [wonBids, setWonBids] = useState<WorkPost[]>([]);
+
+  useEffect(() => {
+    const fetchProjects = async () => {
+      if (!currentUser) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+
+        if (currentUser.role === 'user') {
+          const postsQuery = query(
+            collection(db, 'posts'),
+            where('userId', '==', currentUser.uid)
+          );
+
+          const snapshot = await getDocs(postsQuery);
+
+          const posts = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            bids: doc.data().bids || [],
+            images: doc.data().images || [],
+          })) as WorkPost[];
+
+          posts.sort(
+            (a, b) =>
+              new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime()
+          );
+
+          setUserPosts(posts);
+        } else if (currentUser.role === 'technician') {
+          const snapshot = await getDocs(collection(db, 'posts'));
+
+          const allPosts = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            bids: doc.data().bids || [],
+            images: doc.data().images || [],
+          })) as WorkPost[];
+
+          const selectedPosts = allPosts.filter(post =>
+            post.bids.some(
+              bid => bid.technicianId === currentUser.uid && bid.isSelected
+            )
+          );
+
+          selectedPosts.sort(
+            (a, b) =>
+              new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime()
+          );
+
+          setWonBids(selectedPosts);
+        }
+      } catch (error) {
+        console.error('Error loading projects:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProjects();
+  }, [currentUser]);
 
   if (!currentUser) return <Navigate to="/login" replace />;
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Loading projects...</p>
+      </div>
+    );
+  }
+
   /* ── CLIENT VIEW ── */
   if (currentUser.role === 'user') {
-    const myPosts = mockWorkPosts.filter(p => p.userId === currentUser.id);
+    const myPosts = userPosts;
     const activePosts = myPosts.filter(p => p.status !== 'closed');
     const completedPosts = myPosts.filter(p => p.status === 'closed');
     const displayed = tab === 'active' ? activePosts : completedPosts;
@@ -49,7 +127,7 @@ export function MyProjectsPage() {
                 + Post New Job
               </Link>
             </div>
-            {/* Stats */}
+
             <div className="grid grid-cols-3 gap-4 mt-6 bg-white/10 rounded-xl p-4">
               <div className="text-center">
                 <p className="text-white" style={{ fontWeight: 700, fontSize: '1.5rem' }}>{myPosts.length}</p>
@@ -68,7 +146,6 @@ export function MyProjectsPage() {
         </div>
 
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Tabs */}
           <div className="flex border-b border-border mb-6">
             {(['active', 'completed'] as const).map(t => (
               <button
@@ -154,7 +231,6 @@ export function MyProjectsPage() {
                         </span>
                       </div>
 
-                      {/* Bids summary */}
                       <div className="flex items-center justify-between pt-3 border-t border-border">
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <Users className="w-4 h-4 text-maroon" />
@@ -190,10 +266,15 @@ export function MyProjectsPage() {
   }
 
   /* ── TECHNICIAN VIEW ── */
-  const techData = mockTechnicians.find(t => t.id === currentUser.id) || mockTechnicians[0];
-  const wonBids = mockWorkPosts.filter(p =>
-    p.bids.some(b => b.technicianId === techData.id && b.isSelected)
-  );
+  const techData = mockTechnicians.find(t => t.id === currentUser.uid) || {
+    id: currentUser.uid,
+    name: currentUser.name,
+    rating: currentUser.rating || 0,
+    reviewCount: currentUser.totalReviews || 0,
+    projects: [],
+    completedProjects: 0,
+    reviews: [],
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -219,7 +300,6 @@ export function MyProjectsPage() {
       </div>
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* Won Contracts on Platform */}
         {wonBids.length > 0 && (
           <div>
             <h2 className="text-foreground mb-4" style={{ fontWeight: 700, fontSize: '1.1rem' }}>
@@ -227,7 +307,7 @@ export function MyProjectsPage() {
             </h2>
             <div className="space-y-4">
               {wonBids.map(post => {
-                const myBid = post.bids.find(b => b.technicianId === techData.id && b.isSelected)!;
+                const myBid = post.bids.find(b => b.technicianId === currentUser.uid && b.isSelected)!;
                 return (
                   <div key={post.id} className="bg-card border border-green-200 dark:border-green-800 rounded-xl p-5">
                     <div className="flex items-start justify-between gap-3">
@@ -274,7 +354,6 @@ export function MyProjectsPage() {
           </div>
         )}
 
-        {/* Portfolio Projects */}
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-foreground" style={{ fontWeight: 700, fontSize: '1.1rem' }}>
@@ -299,7 +378,7 @@ export function MyProjectsPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              {techData.projects.map(project => (
+              {techData.projects.map((project: any) => (
                 <div key={project.id} className="bg-card border border-border rounded-xl overflow-hidden hover:shadow-md transition-shadow">
                   <div className="aspect-video overflow-hidden">
                     <img
@@ -335,7 +414,6 @@ export function MyProjectsPage() {
           )}
         </div>
 
-        {/* Reviews summary */}
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-foreground" style={{ fontWeight: 700, fontSize: '1.1rem' }}>⭐ Reviews Received</h2>
@@ -346,18 +424,18 @@ export function MyProjectsPage() {
           <div className="bg-card border border-border rounded-xl p-5">
             <div className="flex items-center gap-4 mb-4">
               <div className="text-center">
-                <p className="text-foreground" style={{ fontSize: '2.5rem', fontWeight: 700, lineHeight: 1 }}>{techData.rating.toFixed(1)}</p>
+                <p className="text-foreground" style={{ fontSize: '2.5rem', fontWeight: 700, lineHeight: 1 }}>{Number(techData.rating || 0).toFixed(1)}</p>
                 <div className="flex gap-0.5 mt-1">
-                  {[1,2,3,4,5].map(i => (
-                    <Star key={i} className={`w-4 h-4 ${i <= Math.round(techData.rating) ? 'fill-gold text-gold' : 'text-muted-foreground'}`} />
+                  {[1, 2, 3, 4, 5].map(i => (
+                    <Star key={i} className={`w-4 h-4 ${i <= Math.round(Number(techData.rating || 0)) ? 'fill-gold text-gold' : 'text-muted-foreground'}`} />
                   ))}
                 </div>
-                <p className="text-muted-foreground text-xs mt-1">{techData.reviewCount} reviews</p>
+                <p className="text-muted-foreground text-xs mt-1">{techData.reviewCount || 0} reviews</p>
               </div>
               <div className="flex-1 space-y-1">
-                {[5,4,3,2,1].map(star => {
-                  const count = techData.reviews.filter(r => r.rating === star).length;
-                  const pct = techData.reviews.length > 0 ? (count / techData.reviews.length) * 100 : 0;
+                {[5, 4, 3, 2, 1].map(star => {
+                  const count = (techData.reviews || []).filter((r: any) => r.rating === star).length;
+                  const pct = (techData.reviews || []).length > 0 ? (count / techData.reviews.length) * 100 : 0;
                   return (
                     <div key={star} className="flex items-center gap-2 text-xs">
                       <span className="text-muted-foreground w-3">{star}</span>
@@ -371,7 +449,8 @@ export function MyProjectsPage() {
                 })}
               </div>
             </div>
-            {techData.reviews.slice(0, 2).map(review => (
+
+            {(techData.reviews || []).slice(0, 2).map((review: any) => (
               <div key={review.id} className="border-t border-border pt-3 mt-3">
                 <div className="flex items-center gap-2 mb-1">
                   <img src={review.userAvatar || ''} alt={review.userName} className="w-7 h-7 rounded-full object-cover" />
@@ -380,7 +459,7 @@ export function MyProjectsPage() {
                     <p className="text-muted-foreground text-xs">{review.projectType}</p>
                   </div>
                   <div className="flex gap-0.5 ml-auto">
-                    {[1,2,3,4,5].map(i => (
+                    {[1, 2, 3, 4, 5].map(i => (
                       <Star key={i} className={`w-3 h-3 ${i <= review.rating ? 'fill-gold text-gold' : 'text-muted-foreground'}`} />
                     ))}
                   </div>

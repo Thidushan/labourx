@@ -31,7 +31,7 @@ function formatCurrency(amount: number) {
 
 export function PostCard({ post }: PostCardProps) {
   const { currentUser } = useAuth();
-  const isOwner = currentUser?.id === post.userId;
+  const isOwner = currentUser?.uid === post.userId;
 
   const timeAgo = (dateStr: string) => {
     const date = new Date(dateStr);

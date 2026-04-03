@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   MapPin, Star, Briefcase, Phone, Mail, Globe, CheckCircle,
   ArrowLeft, Clock, Award, GraduationCap, FolderOpen, MessageSquare,
   Calendar, DollarSign, Share2, Bookmark, AlertCircle
 } from 'lucide-react';
+import { doc, getDoc, collection, getDocs, updateDoc } from 'firebase/firestore';
 import { ReviewCard } from '../components/ReviewCard';
 import { StarRating } from '../components/StarRating';
-import { mockTechnicians, mockWorkPosts } from '../data/mockData';
+import { db } from '../../firebase/config';
 import { useAuth } from '../context/AuthContext';
 
 type TabType = 'overview' | 'portfolio' | 'education' | 'reviews';
@@ -16,28 +17,96 @@ export function TechnicianProfilePage() {
   const { id } = useParams<{ id: string }>();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [newReview, setNewReview] = useState({ rating: 0, comment: '', projectType: '' });
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
 
-  const technician = mockTechnicians.find(t => t.id === id);
+  const [technician, setTechnician] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [hasWorkedTogether, setHasWorkedTogether] = useState(false);
+  const [submittingReview, setSubmittingReview] = useState(false);
 
-  if (!technician) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-foreground mb-2" style={{ fontWeight: 600 }}>Professional not found</h2>
-          <Link to="/search" className="text-maroon hover:underline">Back to Search</Link>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const fetchTechnicianProfile = async () => {
+      if (!id) {
+        setLoading(false);
+        return;
+      }
 
-  // Check if logged-in user (client) has a completed/in-progress project with this technician
-  const hasWorkedTogether = currentUser?.role === 'user' && mockWorkPosts.some(
-    p => p.userId === currentUser.id && p.bids.some(b => b.technicianId === technician.id && b.isSelected)
-  );
+      try {
+        setLoading(true);
+
+        const techRef = doc(db, 'users', id);
+        const techSnap = await getDoc(techRef);
+
+        if (!techSnap.exists()) {
+          setTechnician(null);
+          setLoading(false);
+          return;
+        }
+
+        const data = techSnap.data();
+
+        const techData = {
+          id: techSnap.id,
+          name: data.name || 'Unknown Professional',
+          email: data.email || '',
+          phone: data.phone || '',
+          specialty: data.specialty || 'Professional',
+          location: data.location || data.city || '',
+          city: data.city || '',
+          avatar: data.avatar || data.photoURL || '',
+          role: 'technician',
+          bio: data.bio || '',
+          yearsExperience: Number(data.yearsExperience || 0),
+          rating: Number(data.rating || 0),
+          reviewCount: Number(data.totalReviews || data.reviewCount || 0),
+          skills: Array.isArray(data.skills) ? data.skills : [],
+          certifications: Array.isArray(data.certifications) ? data.certifications : [],
+          education: Array.isArray(data.education) ? data.education : [],
+          projects: Array.isArray(data.projects) ? data.projects : [],
+          reviews: Array.isArray(data.reviews) ? data.reviews : [],
+          availability: data.availability || 'Available',
+          hourlyRate: data.hourlyRate || 'Contact for pricing',
+          completedProjects: Number(data.completedProjects || 0),
+          joinedAt: data.joinedAt || '',
+          isVerified: Boolean(data.isVerified || false),
+          website: data.website || '',
+        };
+
+        setTechnician(techData);
+
+        if (currentUser?.role === 'user') {
+          const postsSnapshot = await getDocs(collection(db, 'posts'));
+
+          const workedTogether = postsSnapshot.docs.some(postDoc => {
+            const post = postDoc.data();
+            const bids = Array.isArray(post.bids) ? post.bids : [];
+
+            return (
+              post.userId === currentUser.uid &&
+              bids.some(
+                (b: any) => b.technicianId === techSnap.id && b.isSelected
+              )
+            );
+          });
+
+          setHasWorkedTogether(workedTogether);
+        } else {
+          setHasWorkedTogether(false);
+        }
+      } catch (error) {
+        console.error('Error loading technician profile:', error);
+        setTechnician(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTechnicianProfile();
+  }, [id, currentUser]);
 
   const openReviewForm = () => {
     setActiveTab('reviews');
@@ -53,11 +122,86 @@ export function TechnicianProfilePage() {
     Limited: 'bg-yellow-100 text-yellow-700',
   };
 
-  const handleSubmitReview = (e: React.FormEvent) => {
+  const handleSubmitReview = async (e: React.FormEvent) => {
     e.preventDefault();
-    setReviewSubmitted(true);
-    setShowReviewForm(false);
+
+    if (!currentUser || !technician || !id || !hasWorkedTogether) return;
+    if (newReview.rating === 0 || !newReview.comment.trim() || !newReview.projectType.trim()) {
+      alert('Please complete all review fields.');
+      return;
+    }
+
+    try {
+      setSubmittingReview(true);
+
+      const newReviewItem = {
+        id: `review-${Date.now()}`,
+        userId: currentUser.uid,
+        userName: currentUser.name,
+        userAvatar: currentUser.avatar || currentUser.photoURL || '',
+        rating: newReview.rating,
+        comment: newReview.comment.trim(),
+        date: new Date().toISOString(),
+        projectType: newReview.projectType.trim(),
+      };
+
+      const existingReviews = Array.isArray(technician.reviews) ? technician.reviews : [];
+      const updatedReviews = [newReviewItem, ...existingReviews];
+      const updatedReviewCount = updatedReviews.length;
+      const updatedRating =
+        updatedReviews.reduce((sum: number, review: any) => sum + Number(review.rating || 0), 0) /
+        updatedReviewCount;
+
+      await updateDoc(doc(db, 'users', id), {
+        reviews: updatedReviews,
+        reviewCount: updatedReviewCount,
+        totalReviews: updatedReviewCount,
+        rating: Number(updatedRating.toFixed(1)),
+      });
+
+      setTechnician((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              reviews: updatedReviews,
+              reviewCount: updatedReviewCount,
+              rating: Number(updatedRating.toFixed(1)),
+            }
+          : prev
+      );
+
+      setReviewSubmitted(true);
+      setShowReviewForm(false);
+      setNewReview({ rating: 0, comment: '', projectType: '' });
+    } catch (error) {
+      console.error('Error submitting review:', error);
+      alert('Failed to submit review. Please try again.');
+    } finally {
+      setSubmittingReview(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-foreground mb-2" style={{ fontWeight: 600 }}>Loading professional...</h2>
+          <p className="text-muted-foreground text-sm">Please wait a moment</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!technician) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-foreground mb-2" style={{ fontWeight: 600 }}>Professional not found</h2>
+          <Link to="/search" className="text-maroon hover:underline">Back to Search</Link>
+        </div>
+      </div>
+    );
+  }
 
   const tabs: { key: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { key: 'overview', label: 'Overview', icon: Briefcase },
@@ -81,7 +225,7 @@ export function TechnicianProfilePage() {
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
             <div className="relative">
               <img
-                src={technician.avatar}
+                src={technician.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(technician.name)}&background=6E1425&color=fff&size=200`}
                 alt={technician.name}
                 className="w-24 h-24 rounded-2xl object-cover border-4 border-white/20 shadow-xl"
                 onError={(e) => {
@@ -100,7 +244,7 @@ export function TechnicianProfilePage() {
                 {technician.isVerified && (
                   <span className="bg-gold/20 border border-gold/40 text-gold text-xs px-2 py-0.5 rounded-full" style={{ fontWeight: 600 }}>✓ Verified</span>
                 )}
-                <span className={`text-xs px-2 py-0.5 rounded-full ${availabilityColors[technician.availability]}`} style={{ fontWeight: 500 }}>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${availabilityColors[technician.availability as keyof typeof availabilityColors] || availabilityColors.Available}`} style={{ fontWeight: 500 }}>
                   {technician.availability}
                 </span>
               </div>
@@ -116,7 +260,7 @@ export function TechnicianProfilePage() {
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Star className="w-4 h-4 fill-gold text-gold" />
-                  <span style={{ fontWeight: 600 }}>{technician.rating.toFixed(1)}</span>
+                  <span style={{ fontWeight: 600 }}>{Number(technician.rating || 0).toFixed(1)}</span>
                   <span>({technician.reviewCount} reviews)</span>
                 </div>
               </div>
@@ -138,7 +282,7 @@ export function TechnicianProfilePage() {
               <p className="text-white/70 text-xs">Projects Done</p>
             </div>
             <div className="text-center border-x border-white/20">
-              <p className="text-white" style={{ fontWeight: 700, fontSize: '1.5rem' }}>{technician.rating}</p>
+              <p className="text-white" style={{ fontWeight: 700, fontSize: '1.5rem' }}>{Number(technician.rating || 0).toFixed(1)}</p>
               <p className="text-white/70 text-xs">Avg Rating</p>
             </div>
             <div className="text-center">
@@ -182,7 +326,7 @@ export function TechnicianProfilePage() {
                 <div className="bg-card border border-border rounded-xl p-5">
                   <h3 className="text-foreground mb-3" style={{ fontWeight: 600 }}>Skills & Expertise</h3>
                   <div className="flex flex-wrap gap-2">
-                    {technician.skills.map(skill => (
+                    {technician.skills.map((skill: string) => (
                       <span key={skill} className="text-sm px-3 py-1 rounded-full bg-maroon-light text-maroon border border-maroon/10">
                         {skill}
                       </span>
@@ -192,7 +336,7 @@ export function TechnicianProfilePage() {
                 <div className="bg-card border border-border rounded-xl p-5">
                   <h3 className="text-foreground mb-3" style={{ fontWeight: 600 }}>Certifications</h3>
                   <div className="space-y-2">
-                    {technician.certifications.map((cert, i) => (
+                    {technician.certifications.map((cert: string, i: number) => (
                       <div key={i} className="flex items-center gap-2 text-sm text-card-foreground">
                         <Award className="w-4 h-4 text-gold flex-shrink-0" />
                         {cert}
@@ -206,7 +350,7 @@ export function TechnicianProfilePage() {
             {/* Portfolio Tab */}
             {activeTab === 'portfolio' && (
               <div className="space-y-5">
-                {technician.projects.map(project => (
+                {technician.projects.map((project: any) => (
                   <div key={project.id} className="bg-card border border-border rounded-xl overflow-hidden">
                     <div className="aspect-video overflow-hidden">
                       <img src={project.image} alt={project.title} className="w-full h-full object-cover hover:scale-105 transition-transform duration-500" />
@@ -242,7 +386,7 @@ export function TechnicianProfilePage() {
             {/* Education Tab */}
             {activeTab === 'education' && (
               <div className="space-y-4">
-                {technician.education.map(edu => (
+                {technician.education.map((edu: any) => (
                   <div key={edu.id} className="bg-card border border-border rounded-xl p-5 flex gap-4">
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
                       edu.type === 'degree' ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' :
@@ -280,13 +424,13 @@ export function TechnicianProfilePage() {
                 {/* Rating Summary */}
                 <div className="bg-card border border-border rounded-xl p-5 flex flex-col sm:flex-row gap-5 items-center">
                   <div className="text-center">
-                    <p className="text-foreground" style={{ fontSize: '3rem', fontWeight: 700, lineHeight: 1 }}>{technician.rating.toFixed(1)}</p>
-                    <StarRating rating={technician.rating} size="md" />
+                    <p className="text-foreground" style={{ fontSize: '3rem', fontWeight: 700, lineHeight: 1 }}>{Number(technician.rating || 0).toFixed(1)}</p>
+                    <StarRating rating={Number(technician.rating || 0)} size="md" />
                     <p className="text-muted-foreground text-sm mt-1">{technician.reviewCount} reviews</p>
                   </div>
                   <div className="flex-1 w-full space-y-1.5">
                     {[5, 4, 3, 2, 1].map(star => {
-                      const count = technician.reviews.filter(r => r.rating === star).length;
+                      const count = technician.reviews.filter((r: any) => r.rating === star).length;
                       const pct = technician.reviewCount > 0 ? (count / Math.max(technician.reviewCount, technician.reviews.length)) * 100 : 0;
                       return (
                         <div key={star} className="flex items-center gap-2 text-sm">
@@ -351,7 +495,14 @@ export function TechnicianProfilePage() {
                       />
                     </div>
                     <div className="flex gap-2">
-                      <button type="submit" className="flex-1 bg-maroon text-white py-2.5 rounded-lg text-sm hover:bg-maroon-dark transition-colors" style={{ fontWeight: 600 }}>Submit Review</button>
+                      <button
+                        type="submit"
+                        disabled={submittingReview}
+                        className="flex-1 bg-maroon text-white py-2.5 rounded-lg text-sm hover:bg-maroon-dark transition-colors disabled:opacity-60"
+                        style={{ fontWeight: 600 }}
+                      >
+                        {submittingReview ? 'Submitting...' : 'Submit Review'}
+                      </button>
                       <button type="button" onClick={() => setShowReviewForm(false)} className="px-4 py-2.5 rounded-lg text-sm border border-border hover:bg-muted transition-colors text-foreground" style={{ fontWeight: 500 }}>Cancel</button>
                     </div>
                   </form>
@@ -359,7 +510,7 @@ export function TechnicianProfilePage() {
 
                 {/* Reviews List */}
                 <div className="space-y-4">
-                  {technician.reviews.map(review => (
+                  {technician.reviews.map((review: any) => (
                     <ReviewCard key={review.id} review={review} />
                   ))}
                 </div>
@@ -496,7 +647,9 @@ export function TechnicianProfilePage() {
                 <p className="text-foreground text-sm" style={{ fontWeight: 600 }}>Member Since</p>
               </div>
               <p className="text-muted-foreground text-sm">
-                {new Date(technician.joinedAt).toLocaleDateString('en-LK', { year: 'numeric', month: 'long' })}
+                {technician.joinedAt
+                  ? new Date(technician.joinedAt).toLocaleDateString('en-LK', { year: 'numeric', month: 'long' })
+                  : '—'}
               </p>
             </div>
 

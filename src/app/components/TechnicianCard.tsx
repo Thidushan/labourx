@@ -25,6 +25,25 @@ export function TechnicianCard({
       "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
   };
 
+  const safeAvailability =
+    technician.availability && availabilityColors[technician.availability]
+      ? technician.availability
+      : "Available";
+
+  const safeAvatar =
+    technician.avatar ||
+    `https://ui-avatars.com/api/?name=${encodeURIComponent(
+      technician.name || "Professional"
+    )}&background=8B1A2F&color=fff`;
+
+  const safeRating = Number(technician.rating || 0);
+  const safeReviewCount = Number(technician.reviewCount || 0);
+  const safeSkills = Array.isArray(technician.skills) ? technician.skills : [];
+  const safeHourlyRate = technician.hourlyRate || "Contact for pricing";
+  const safeLocation = technician.location || technician.city || "Location not specified";
+  const safeExperience = Number(technician.yearsExperience || 0);
+  const safeCompletedProjects = Number(technician.completedProjects || 0);
+
   return (
     <div
       className={`bg-card border border-border rounded-xl overflow-hidden hover:shadow-xl transition-all duration-300 hover:-translate-y-1 ${featured ? "ring-2 ring-gold" : ""}`}
@@ -41,12 +60,12 @@ export function TechnicianCard({
         <div className="flex items-start gap-4">
           <div className="relative flex-shrink-0">
             <img
-              src={technician.avatar}
+              src={safeAvatar}
               alt={technician.name}
               className="w-16 h-16 rounded-full object-cover border-2 border-maroon/20"
               onError={(e) => {
                 (e.target as HTMLImageElement).src =
-                  `https://ui-avatars.com/api/?name=${encodeURIComponent(technician.name)}&background=8B1A2F&color=fff`;
+                  `https://ui-avatars.com/api/?name=${encodeURIComponent(technician.name || "Professional")}&background=8B1A2F&color=fff`;
               }}
             />
             {technician.isVerified && (
@@ -72,10 +91,10 @@ export function TechnicianCard({
                 </p>
               </div>
               <span
-                className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${availabilityColors[technician.availability]}`}
+                className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${availabilityColors[safeAvailability]}`}
                 style={{ fontWeight: 500 }}
               >
-                {technician.availability}
+                {safeAvailability}
               </span>
             </div>
             <div className="flex items-center gap-1 mt-1">
@@ -84,10 +103,10 @@ export function TechnicianCard({
                 className="text-sm"
                 style={{ fontWeight: 600 }}
               >
-                {technician.rating.toFixed(1)}
+                {safeRating.toFixed(1)}
               </span>
               <span className="text-muted-foreground text-sm">
-                ({technician.reviewCount} reviews)
+                ({safeReviewCount} reviews)
               </span>
             </div>
           </div>
@@ -97,25 +116,25 @@ export function TechnicianCard({
           <div className="flex items-center gap-1.5 text-muted-foreground text-sm">
             <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
             <span className="truncate">
-              {technician.location}
+              {safeLocation}
             </span>
           </div>
           <div className="flex items-center gap-1.5 text-muted-foreground text-sm">
             <Briefcase className="w-3.5 h-3.5 flex-shrink-0" />
             <span>
-              {technician.yearsExperience} years experience
+              {safeExperience} years experience
             </span>
           </div>
           <div className="flex items-center gap-1.5 text-muted-foreground text-sm">
             <Clock className="w-3.5 h-3.5 flex-shrink-0" />
             <span>
-              {technician.completedProjects} projects completed
+              {safeCompletedProjects} projects completed
             </span>
           </div>
         </div>
 
         <div className="mt-3 flex flex-wrap gap-1.5">
-          {technician.skills.slice(0, 3).map((skill) => (
+          {safeSkills.slice(0, 3).map((skill) => (
             <span
               key={skill}
               className="text-xs px-2 py-0.5 rounded-full bg-maroon-light text-maroon border border-maroon/10"
@@ -123,9 +142,9 @@ export function TechnicianCard({
               {skill}
             </span>
           ))}
-          {technician.skills.length > 3 && (
+          {safeSkills.length > 3 && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
-              +{technician.skills.length - 3} more
+              +{safeSkills.length - 3} more
             </span>
           )}
         </div>
@@ -136,7 +155,7 @@ export function TechnicianCard({
               className="text-gold"
               style={{ fontWeight: 700 }}
             >
-              {technician.hourlyRate}
+              {safeHourlyRate}
             </span>
           </div>
           <Link

@@ -15,14 +15,29 @@ import {
 import { SPECIALTIES } from '../types';
 import { registerUser } from '../../firebase/authService';
 
+type Role = 'user' | 'technician';
+
+interface RegisterForm {
+  name: string;
+  email: string;
+  phone: string;
+  password: string;
+  age: string;
+  address: string;
+  city: string;
+  specialty: string;
+  yearsExperience: string;
+  bio: string;
+}
+
 export function RegisterPage() {
-  const [role, setRole] = useState<'user' | 'technician'>('user');
+  const [role, setRole] = useState<Role>('user');
   const [step, setStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<RegisterForm>({
     name: '',
     email: '',
     phone: '',
@@ -35,42 +50,91 @@ export function RegisterPage() {
     bio: '',
   });
 
-  const update = (field: string, value: string) => {
+  const update = (field: keyof RegisterForm, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const validateStepTwo = () => {
+    if (!form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.city.trim()) {
+      alert('Please fill all required fields');
+      return false;
+    }
+
+    if (!form.password || form.password.length < 8) {
+      alert('Password must be at least 8 characters');
+      return false;
+    }
+
+    if (form.age && Number(form.age) < 1) {
+      alert('Please enter a valid age');
+      return false;
+    }
+
+    return true;
+  };
+
+  const validateTechnicianFields = () => {
+    if (!form.specialty || !form.yearsExperience || !form.bio.trim()) {
+      alert('Please complete all professional details');
+      return false;
+    }
+
+    if (Number(form.yearsExperience) < 1) {
+      alert('Years of experience must be at least 1');
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleContinueFromStepTwo = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!validateStepTwo()) return;
+
+    if (role === 'user') {
+      handleRegister(e);
+      return;
+    }
+
+    setStep(3);
   };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (form.password.length < 8) {
-      alert('Password must be at least 8 characters');
-      return;
-    }
+    if (!validateStepTwo()) return;
 
-    if (!form.name || !form.email || !form.phone || !form.city) {
-      alert('Please fill all required fields');
+    if (role === 'technician' && !validateTechnicianFields()) {
       return;
-    }
-
-    if (role === 'technician') {
-      if (!form.specialty || !form.yearsExperience || !form.bio) {
-        alert('Please complete all professional details');
-        return;
-      }
     }
 
     setLoading(true);
 
     try {
-      await registerUser(role, form);
+      const payload = {
+        ...form,
+        name: form.name.trim(),
+        email: form.email.trim().toLowerCase(),
+        phone: form.phone.trim(),
+        address: form.address.trim(),
+        city: form.city.trim(),
+        bio: form.bio.trim(),
+        age: form.age.trim(),
+        yearsExperience: form.yearsExperience.trim(),
+      };
+
+      await registerUser(role, payload);
       navigate('/dashboard');
     } catch (error: any) {
-      console.error(error);
+      console.error('Registration error:', error);
 
       if (error.code === 'auth/email-already-in-use') {
         alert('Email already exists');
       } else if (error.code === 'auth/invalid-email') {
         alert('Invalid email address');
+      } else if (error.code === 'auth/weak-password') {
+        alert('Password is too weak');
       } else {
         alert(error.message || 'Registration failed');
       }
@@ -86,7 +150,6 @@ export function RegisterPage() {
 
   return (
     <div className="min-h-screen bg-maroon-light flex items-center justify-center py-12 px-4">
-      {/* Back button */}
       <button
         onClick={() => (step === 1 ? navigate(-1) : setStep((s) => s - 1))}
         className="absolute top-5 left-5 inline-flex items-center gap-1.5 text-maroon hover:text-maroon-dark transition-colors text-sm"
@@ -97,7 +160,6 @@ export function RegisterPage() {
       </button>
 
       <div className="w-full max-w-lg">
-        {/* Logo */}
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center gap-2 mb-4">
             <div className="w-10 h-10 bg-maroon rounded-xl flex items-center justify-center">
@@ -116,7 +178,6 @@ export function RegisterPage() {
         </div>
 
         <div className="bg-card border border-border rounded-2xl p-8 shadow-lg">
-          {/* STEP 1 - ROLE */}
           {step === 1 && (
             <div>
               <p className="text-foreground mb-4 text-center font-semibold">
@@ -201,18 +262,8 @@ export function RegisterPage() {
             </div>
           )}
 
-          {/* STEP 2 - PERSONAL INFO */}
           {step === 2 && (
-            <form
-              onSubmit={
-                role === 'user'
-                  ? handleRegister
-                  : (e) => {
-                      e.preventDefault();
-                      setStep(3);
-                    }
-              }
-            >
+            <form onSubmit={handleContinueFromStepTwo}>
               <div className="flex items-center gap-2 mb-5">
                 <button
                   type="button"
@@ -281,33 +332,30 @@ export function RegisterPage() {
                   />
                 </div>
 
-                {/* These were missing in your simplified version */}
-                {role === 'user' && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className={labelClass}>Age</label>
-                      <input
-                        type="number"
-                        value={form.age}
-                        onChange={(e) => update('age', e.target.value)}
-                        placeholder="35"
-                        className={inputClass}
-                        min="1"
-                      />
-                    </div>
-
-                    <div>
-                      <label className={labelClass}>Address</label>
-                      <input
-                        type="text"
-                        value={form.address}
-                        onChange={(e) => update('address', e.target.value)}
-                        placeholder="Your address"
-                        className={inputClass}
-                      />
-                    </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>Age</label>
+                    <input
+                      type="number"
+                      value={form.age}
+                      onChange={(e) => update('age', e.target.value)}
+                      placeholder="35"
+                      className={inputClass}
+                      min="1"
+                    />
                   </div>
-                )}
+
+                  <div>
+                    <label className={labelClass}>Address</label>
+                    <input
+                      type="text"
+                      value={form.address}
+                      onChange={(e) => update('address', e.target.value)}
+                      placeholder="Your address"
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
 
                 <div>
                   <label className={labelClass}>Password *</label>
@@ -350,7 +398,6 @@ export function RegisterPage() {
             </form>
           )}
 
-          {/* STEP 3 - TECHNICIAN INFO */}
           {step === 3 && role === 'technician' && (
             <form onSubmit={handleRegister}>
               <div className="flex items-center gap-2 mb-5">

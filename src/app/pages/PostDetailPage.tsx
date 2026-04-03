@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowLeft, MapPin, Clock, DollarSign, Users, Calendar, Tag,
-  Star, CheckCircle, Send, AlertCircle, ChevronDown, ChevronUp, Edit } from 'lucide-react';
+  Star, CheckCircle, Send, AlertCircle, ChevronDown, ChevronUp, Edit
+} from 'lucide-react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { mockWorkPosts, mockTechnicians } from '../data/mockData';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { db } from '../../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import { Bid } from '../types';
 
@@ -18,11 +20,15 @@ export function PostDetailPage() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
 
-  const post = mockWorkPosts.find(p => p.id === id);
-  const [bids, setBids] = useState<Bid[]>(post?.bids || []);
+  const [post, setPost] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [bids, setBids] = useState<Bid[]>([]);
   const [showBidForm, setShowBidForm] = useState(false);
   const [bidSubmitted, setBidSubmitted] = useState(false);
   const [expandedBid, setExpandedBid] = useState<string | null>(null);
+  const [submittingBid, setSubmittingBid] = useState(false);
+  const [selectingBid, setSelectingBid] = useState(false);
+
   const [bidForm, setBidForm] = useState({
     budget: '',
     timeline: '',
@@ -30,19 +36,58 @@ export function PostDetailPage() {
     approach: '',
   });
 
-  if (!post) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-foreground mb-2" style={{ fontWeight: 600 }}>Post not found</h2>
-          <Link to="/posts" className="text-maroon hover:underline">Back to Posts</Link>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const fetchPost = async () => {
+      if (!id) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+
+        const postRef = doc(db, 'posts', id);
+        const postSnap = await getDoc(postRef);
+
+        if (postSnap.exists()) {
+          const postData = {
+            id: postSnap.id,
+            ...postSnap.data(),
+            bids: postSnap.data().bids || [],
+            images: postSnap.data().images || [],
+          };
+
+          setPost(postData);
+          setBids(postData.bids || []);
+
+          if (currentUser?.uid) {
+            const alreadySubmitted = (postData.bids || []).some(
+              (b: Bid) => b.technicianId === currentUser.uid
+            );
+            setBidSubmitted(alreadySubmitted);
+          }
+        } else {
+          setPost(null);
+        }
+      } catch (error) {
+        console.error('Error loading post:', error);
+        setPost(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPost();
+  }, [id, currentUser?.uid]);
 
   const currentTechnician = currentUser?.role === 'technician'
-    ? mockTechnicians.find(t => t.id === currentUser.id) || mockTechnicians[0]
+    ? {
+        id: currentUser.uid,
+        name: currentUser.name,
+        avatar: currentUser.avatar || currentUser.photoURL || '',
+        specialty: currentUser.specialty || 'Professional',
+        rating: currentUser.rating || 0,
+      }
     : null;
 
   const statusConfig = {
@@ -51,9 +96,17 @@ export function PostDetailPage() {
     closed: { label: 'Closed', color: 'bg-gray-100 text-gray-600 dark:bg-gray-900/30 dark:text-gray-400' },
   };
 
-  const handleSubmitBid = (e: React.FormEvent) => {
+  const handleSubmitBid = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentTechnician) return;
+    if (!currentTechnician || !post || !id || !currentUser) return;
+
+    const duplicateBid = bids.some(b => b.technicianId === currentUser.uid);
+    if (duplicateBid) {
+      alert('You have already submitted a bid for this post.');
+      setBidSubmitted(true);
+      setShowBidForm(false);
+      return;
+    }
 
     const newBid: Bid = {
       id: `bid-${Date.now()}`,
@@ -69,18 +122,96 @@ export function PostDetailPage() {
       submittedAt: new Date().toISOString(),
     };
 
-    setBids(prev => [...prev, newBid]);
-    setBidSubmitted(true);
-    setShowBidForm(false);
+    try {
+      setSubmittingBid(true);
+
+      const updatedBids = [...bids, newBid];
+
+      await updateDoc(doc(db, 'posts', id), {
+        bids: updatedBids,
+      });
+
+      setBids(updatedBids);
+      setPost((prev: any) => prev ? { ...prev, bids: updatedBids } : prev);
+      setBidSubmitted(true);
+      setShowBidForm(false);
+      setBidForm({
+        budget: '',
+        timeline: '',
+        description: '',
+        approach: '',
+      });
+    } catch (error) {
+      console.error('Error submitting bid:', error);
+      alert('Failed to submit bid. Please try again.');
+    } finally {
+      setSubmittingBid(false);
+    }
   };
 
-  const handleSelectBid = (bidId: string) => {
-    setBids(prev => prev.map(b => ({ ...b, isSelected: b.id === bidId })));
+  const handleSelectBid = async (bidId: string) => {
+    if (!id || !post) return;
+
+    try {
+      setSelectingBid(true);
+
+      const updatedBids = bids.map(b => ({
+        ...b,
+        isSelected: b.id === bidId,
+      }));
+
+      await updateDoc(doc(db, 'posts', id), {
+        bids: updatedBids,
+        status: 'in-progress',
+      });
+
+      setBids(updatedBids);
+      setPost((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              bids: updatedBids,
+              status: 'in-progress',
+            }
+          : prev
+      );
+    } catch (error) {
+      console.error('Error selecting bid:', error);
+      alert('Failed to select bid. Please try again.');
+    } finally {
+      setSelectingBid(false);
+    }
   };
 
-  const isPostOwner = currentUser?.id === post.userId;
-  const canBid = currentUser?.role === 'technician' && post.status === 'open' && !bidSubmitted;
-  const alreadyBid = bids.some(b => b.technicianId === currentUser?.id);
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-foreground mb-2" style={{ fontWeight: 600 }}>Loading post...</h2>
+          <p className="text-muted-foreground text-sm">Please wait a moment</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!post) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-foreground mb-2" style={{ fontWeight: 600 }}>Post not found</h2>
+          <Link to="/posts" className="text-maroon hover:underline">Back to Posts</Link>
+        </div>
+      </div>
+    );
+  }
+
+  const isPostOwner = currentUser?.uid === post.userId;
+  const alreadyBid = bids.some(b => b.technicianId === currentUser?.uid);
+  const canBid =
+    currentUser?.role === 'technician' &&
+    post.status === 'open' &&
+    !alreadyBid &&
+    !bidSubmitted;
 
   return (
     <div className="min-h-screen bg-background">
@@ -99,8 +230,8 @@ export function PostDetailPage() {
                 <span className="bg-maroon-light text-maroon text-xs px-2 py-0.5 rounded-full flex items-center gap-1" style={{ fontWeight: 500 }}>
                   <Tag className="w-3 h-3" /> {post.category}
                 </span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${statusConfig[post.status].color}`} style={{ fontWeight: 500 }}>
-                  {statusConfig[post.status].label}
+                <span className={`text-xs px-2 py-0.5 rounded-full ${statusConfig[post.status as keyof typeof statusConfig]?.color || statusConfig.open.color}`} style={{ fontWeight: 500 }}>
+                  {statusConfig[post.status as keyof typeof statusConfig]?.label || 'Open for Bids'}
                 </span>
               </div>
               <h1 className="text-foreground mb-3" style={{ fontSize: '1.5rem', fontWeight: 700 }}>{post.title}</h1>
@@ -215,8 +346,12 @@ export function PostDetailPage() {
                     />
                   </div>
                   <div className="flex gap-2">
-                    <button type="submit" className="bg-maroon hover:bg-maroon-dark text-white px-5 py-2.5 rounded-lg text-sm transition-colors" style={{ fontWeight: 600 }}>Submit Bid</button>
-                    <button type="button" onClick={() => setShowBidForm(false)} className="px-4 py-2.5 rounded-lg text-sm border border-border hover:bg-muted transition-colors text-foreground" style={{ fontWeight: 500 }}>Cancel</button>
+                    <button type="submit" disabled={submittingBid} className="bg-maroon hover:bg-maroon-dark text-white px-5 py-2.5 rounded-lg text-sm transition-colors disabled:opacity-60" style={{ fontWeight: 600 }}>
+                      {submittingBid ? 'Submitting...' : 'Submit Bid'}
+                    </button>
+                    <button type="button" onClick={() => setShowBidForm(false)} className="px-4 py-2.5 rounded-lg text-sm border border-border hover:bg-muted transition-colors text-foreground" style={{ fontWeight: 500 }}>
+                      Cancel
+                    </button>
                   </div>
                 </form>
               )}
@@ -300,10 +435,11 @@ export function PostDetailPage() {
                           {isPostOwner && !bid.isSelected && post.status !== 'closed' && (
                             <button
                               onClick={() => handleSelectBid(bid.id)}
-                              className="text-xs bg-maroon text-white px-3 py-1.5 rounded-lg hover:bg-maroon-dark transition-colors"
+                              disabled={selectingBid}
+                              className="text-xs bg-maroon text-white px-3 py-1.5 rounded-lg hover:bg-maroon-dark transition-colors disabled:opacity-60"
                               style={{ fontWeight: 500 }}
                             >
-                              Select this Bid
+                              {selectingBid ? 'Saving...' : 'Select this Bid'}
                             </button>
                           )}
                           <Link to={`/technician/${bid.technicianId}`} className="text-xs text-muted-foreground hover:text-maroon transition-colors">

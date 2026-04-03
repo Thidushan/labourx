@@ -31,6 +31,22 @@ interface AuthContextType {
   logout: () => Promise<void>;
 }
 
+interface FirestoreUserData {
+  name?: string;
+  email?: string;
+  role?: UserRole;
+  phone?: string;
+  city?: string;
+  specialty?: string;
+  age?: number | null;
+  address?: string;
+  yearsExperience?: number;
+  bio?: string;
+  rating?: number;
+  totalReviews?: number;
+  avatar?: string;
+}
+
 const AuthContext = createContext<AuthContextType>({
   user: null,
   currentUser: null,
@@ -50,7 +66,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         if (!firebaseUser) {
           setUser(null);
-          setLoading(false);
           return;
         }
 
@@ -58,7 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const userSnap = await getDoc(userRef);
 
         if (userSnap.exists()) {
-          const data = userSnap.data();
+          const data = userSnap.data() as FirestoreUserData;
 
           const mergedUser: AuthUser = {
             uid: firebaseUser.uid,
@@ -68,7 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               firebaseUser.email?.split('@')[0] ||
               'User',
             email: data.email || firebaseUser.email || '',
-            role: (data.role as UserRole) || 'user',
+            role: data.role || 'user',
             phone: data.phone || '',
             city: data.city || '',
             specialty: data.specialty || '',
@@ -84,7 +99,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           setUser(mergedUser);
         } else {
-          // Fallback user if Auth exists but Firestore doc is missing
           const fallbackUser: AuthUser = {
             uid: firebaseUser.uid,
             name:
@@ -137,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
-        currentUser: user, // compatibility for older components like Navbar
+        currentUser: user,
         loading,
         isAuthenticated: !!user,
         logout,
