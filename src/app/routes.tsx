@@ -33,37 +33,35 @@ function RootLayout() {
 export const router = createBrowserRouter([
   {
     path: '/',
-    Component: RootLayout,
+    element: <RootLayout />,
     children: [
-      { index: true, Component: HomePage },
-      { path: 'search', Component: SearchPage },
-      { path: 'technician/:id', Component: TechnicianProfilePage },
-      { path: 'posts', Component: PostsPage },
-      { path: 'posts/create', Component: CreatePostPage },
-      { path: 'posts/:id', Component: PostDetailPage },
-      { path: 'posts/:id/edit', Component: EditPostPage },
+      { index: true, element: <HomePage /> },
+      { path: 'search', element: <SearchPage /> },
+      { path: 'technician/:id', element: <TechnicianProfilePage /> },
+      { path: 'posts', element: <PostsPage /> },
+      { path: 'posts/create', element: <CreatePostPage /> },
+      { path: 'posts/:id', element: <PostDetailPage /> },
+      { path: 'posts/:id/edit', element: <EditPostPage /> },
 
-      // 🔐 PROTECTED ROUTES GROUP
       {
         element: <ProtectedRoute />,
         children: [
-          { path: 'dashboard', Component: DashboardPage },
-          { path: 'profile', Component: ProfilePage },
-          { path: 'my-projects', Component: MyProjectsPage },
-          { path: 'nearby', Component: NearbyMapPage },
+          { path: 'dashboard', element: <DashboardPage /> },
+          { path: 'profile', element: <ProfilePage /> },
+          { path: 'my-projects', element: <MyProjectsPage /> },
+          { path: 'nearby', element: <NearbyMapPage /> },
         ],
       },
 
-      { path: '*', Component: NotFoundPage },
+      { path: '*', element: <NotFoundPage /> },
     ],
   },
-
   {
     path: '/login',
-    Component: LoginPage,
+    element: <LoginPage />,
   },
   {
     path: '/register',
-    Component: RegisterPage,
+    element: <RegisterPage />,
   },
 ]);

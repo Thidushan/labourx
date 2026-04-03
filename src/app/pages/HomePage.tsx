@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Search, Star, Shield, Zap, Users, TrendingUp, ArrowRight,
   HardHat, Lightbulb, Droplets, Palette, PenTool, Hammer,
-  CheckCircle, Award, Clock, MessageSquare, ChevronRight
+  CheckCircle, Award, MessageSquare, ChevronRight
 } from 'lucide-react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../../firebase/config';
 import { TechnicianCard } from '../components/TechnicianCard';
 import { PostCard } from '../components/PostCard';
-import { mockTechnicians, mockWorkPosts } from '../data/mockData';
 
 const categories = [
   { name: 'Mason', icon: HardHat, color: 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400', description: 'Brickwork, Concrete & Foundations' },
@@ -60,15 +61,113 @@ const testimonials = [
 
 export function HomePage() {
   const [searchQuery, setSearchQuery] = useState('');
+  const [technicians, setTechnicians] = useState<any[]>([]);
+  const [workPosts, setWorkPosts] = useState<any[]>([]);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchHomepageData = async () => {
+      try {
+        const [usersSnapshot, postsSnapshot] = await Promise.all([
+          getDocs(collection(db, 'users')),
+          getDocs(collection(db, 'posts')),
+        ]);
+
+        const usersData: any[] = usersSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          uid: doc.id,
+          ...doc.data(),
+        }));
+
+        const postsData: any[] = postsSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+
+        const technicianUsers = usersData.filter(
+          (user: any) => String(user.role || '').toLowerCase() === 'technician'
+        );
+
+        setTechnicians(technicianUsers);
+        setWorkPosts(postsData);
+      } catch (error) {
+        console.error('Error fetching homepage data:', error);
+        setTechnicians([]);
+        setWorkPosts([]);
+      }
+    };
+
+    fetchHomepageData();
+  }, []);
+
+  const featuredTechnicians = useMemo(() => {
+    return [...technicians]
+      .sort((a: any, b: any) => {
+        const ratingA = Number(a.rating ?? 0);
+        const ratingB = Number(b.rating ?? 0);
+
+        if (ratingB !== ratingA) return ratingB - ratingA;
+
+        const reviewsA = Number(a.totalReviews ?? 0);
+        const reviewsB = Number(b.totalReviews ?? 0);
+
+        if (reviewsB !== reviewsA) return reviewsB - reviewsA;
+
+        return 0;
+      })
+      .slice(0, 3);
+  }, [technicians]);
+
+  const recentWorkPosts = useMemo(() => {
+    return [...workPosts]
+      .filter((post: any) => {
+        const status = String(post.status || '').toLowerCase();
+        return !status || status === 'open' || status === 'active';
+      })
+      .sort((a: any, b: any) => {
+        const aTime =
+          a.createdAt?.seconds
+            ? a.createdAt.seconds
+            : a.createdAt instanceof Date
+            ? a.createdAt.getTime()
+            : 0;
+
+        const bTime =
+          b.createdAt?.seconds
+            ? b.createdAt.seconds
+            : b.createdAt instanceof Date
+            ? b.createdAt.getTime()
+            : 0;
+
+        return bTime - aTime;
+      })
+      .slice(0, 3);
+  }, [workPosts]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchQuery.trim()) {
-      navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
-    } else {
+
+    const trimmedQuery = searchQuery.trim();
+
+    if (!trimmedQuery) {
       navigate('/search');
+      return;
     }
+
+    const matchedCategory = categories.find(
+      (cat) => cat.name.toLowerCase() === trimmedQuery.toLowerCase()
+    );
+
+    if (matchedCategory) {
+      navigate(`/search?specialty=${encodeURIComponent(matchedCategory.name)}`);
+      return;
+    }
+
+    navigate(`/search?q=${encodeURIComponent(trimmedQuery)}`);
+  };
+
+  const handleSpecialtyClick = (specialty: string) => {
+    navigate(`/search?specialty=${encodeURIComponent(specialty)}`);
   };
 
   return (
@@ -91,7 +190,7 @@ export function HomePage() {
               <span style={{ color: '#C9A84C' }}>Trusted Professionals</span>
             </h1>
             <p className="text-white/80 mb-8 text-lg">
-              Connect with verified masons, electricians, plumbers, architects, and more. 
+              Connect with verified masons, electricians, plumbers, architects, and more.
               Find the right expert for your construction project.
             </p>
             <form onSubmit={handleSearch} className="flex gap-2 max-w-xl">
@@ -117,7 +216,7 @@ export function HomePage() {
               {['Mason', 'Electrician', 'Plumber', 'Architect', 'Interior Designer'].map(tag => (
                 <button
                   key={tag}
-                  onClick={() => navigate(`/search?specialty=${tag}`)}
+                  onClick={() => handleSpecialtyClick(tag)}
                   className="text-white/80 hover:text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-full px-3 py-1 text-xs transition-colors"
                 >
                   {tag}
@@ -153,7 +252,7 @@ export function HomePage() {
             {categories.map(cat => (
               <Link
                 key={cat.name}
-                to={`/search?specialty=${cat.name}`}
+                to={`/search?specialty=${encodeURIComponent(cat.name)}`}
                 className="group flex flex-col items-center p-5 rounded-xl border border-border bg-card hover:border-maroon hover:shadow-md transition-all duration-200"
               >
                 <div className={`w-12 h-12 rounded-xl ${cat.color} flex items-center justify-center mb-3 group-hover:scale-110 transition-transform`}>
@@ -216,7 +315,7 @@ export function HomePage() {
             </Link>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {mockTechnicians.slice(0, 3).map((tech, i) => (
+            {featuredTechnicians.map((tech, i) => (
               <TechnicianCard key={tech.id} technician={tech} featured={i === 0} />
             ))}
           </div>
@@ -266,7 +365,7 @@ export function HomePage() {
             </Link>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {mockWorkPosts.slice(0, 3).map(post => (
+            {recentWorkPosts.map((post) => (
               <PostCard key={post.id} post={post} />
             ))}
           </div>

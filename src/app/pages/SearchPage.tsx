@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Search, SlidersHorizontal, X, MapPin, Star, Navigation } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
@@ -6,7 +6,7 @@ import { TechnicianCard } from '../components/TechnicianCard';
 import { db } from '../../firebase/config';
 import { Technician, SPECIALTIES } from '../types';
 
-const cities = [
+const defaultCities = [
   'All Cities',
   'Colombo',
   'Kandy',
@@ -18,21 +18,44 @@ const cities = [
   'Ratnapura',
 ];
 
-const normalize = (value: string) => String(value || '').trim().toLowerCase();
+const normalize = (value: unknown) => String(value || '').trim().toLowerCase();
 
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const isSyncingRef = useRef(false);
 
-  const [query, setQuery] = useState(searchParams.get('q') || '');
-  const [selectedSpecialty, setSelectedSpecialty] = useState(searchParams.get('specialty') || '');
-  const [selectedCity, setSelectedCity] = useState(searchParams.get('city') || 'All Cities');
-  const [minRating, setMinRating] = useState(Number(searchParams.get('minRating') || 0));
-  const [availability, setAvailability] = useState(searchParams.get('availability') || '');
-  const [sortBy, setSortBy] = useState(searchParams.get('sortBy') || 'rating');
+  const [query, setQuery] = useState('');
+  const [selectedSpecialty, setSelectedSpecialty] = useState('');
+  const [selectedCity, setSelectedCity] = useState('All Cities');
+  const [minRating, setMinRating] = useState(0);
+  const [availability, setAvailability] = useState('');
+  const [sortBy, setSortBy] = useState('rating');
   const [showFilters, setShowFilters] = useState(false);
+
   const [allTechnicians, setAllTechnicians] = useState<Technician[]>([]);
-  const [results, setResults] = useState<Technician[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // URL -> State
+  useEffect(() => {
+    if (isSyncingRef.current) {
+      isSyncingRef.current = false;
+      return;
+    }
+
+    const nextQuery = searchParams.get('q') || '';
+    const nextSpecialty = searchParams.get('specialty') || '';
+    const nextCity = searchParams.get('city') || 'All Cities';
+    const nextMinRating = Number(searchParams.get('minRating') || 0);
+    const nextAvailability = searchParams.get('availability') || '';
+    const nextSortBy = searchParams.get('sortBy') || 'rating';
+
+    setQuery((prev) => (prev !== nextQuery ? nextQuery : prev));
+    setSelectedSpecialty((prev) => (prev !== nextSpecialty ? nextSpecialty : prev));
+    setSelectedCity((prev) => (prev !== nextCity ? nextCity : prev));
+    setMinRating((prev) => (prev !== nextMinRating ? nextMinRating : prev));
+    setAvailability((prev) => (prev !== nextAvailability ? nextAvailability : prev));
+    setSortBy((prev) => (prev !== nextSortBy ? nextSortBy : prev));
+  }, [searchParams]);
 
   useEffect(() => {
     const fetchTechnicians = async () => {
@@ -43,7 +66,7 @@ export function SearchPage() {
 
         const technicians: Technician[] = snapshot.docs
           .map((docSnap) => {
-            const data = docSnap.data();
+            const data: any = docSnap.data();
 
             return {
               id: docSnap.id,
@@ -52,7 +75,7 @@ export function SearchPage() {
               phone: data.phone || '',
               specialty: data.specialty || 'Professional',
               location: data.location || data.city || '',
-              city: data.city || '',
+              city: data.city || data.location || '',
               avatar: data.avatar || data.photoURL || '',
               role: data.role || '',
               bio: data.bio || '',
@@ -75,11 +98,9 @@ export function SearchPage() {
           .filter((user) => normalize((user as any).role) === 'technician');
 
         setAllTechnicians(technicians);
-        setResults(technicians);
       } catch (error) {
         console.error('Error fetching technicians:', error);
         setAllTechnicians([]);
-        setResults([]);
       } finally {
         setLoading(false);
       }
@@ -88,28 +109,54 @@ export function SearchPage() {
     fetchTechnicians();
   }, []);
 
-  useEffect(() => {
+  const cities = useMemo(() => {
+    const firestoreCities = allTechnicians
+      .map((tech) => String(tech.city || '').trim())
+      .filter(Boolean);
+
+    return [
+      'All Cities',
+      ...Array.from(new Set([...defaultCities.slice(1), ...firestoreCities])),
+    ];
+  }, [allTechnicians]);
+
+  const results = useMemo(() => {
     let filtered = [...allTechnicians];
 
     if (query.trim()) {
       const q = normalize(query);
-      filtered = filtered.filter((t) =>
-        normalize(t.name).includes(q) ||
-        normalize(t.specialty).includes(q) ||
-        normalize(t.city).includes(q) ||
-        (Array.isArray(t.skills) ? t.skills : []).some((skill) => normalize(skill).includes(q))
-      );
+
+      filtered = filtered.filter((t) => {
+        const skills = Array.isArray(t.skills) ? t.skills : [];
+
+        return (
+          normalize(t.name).includes(q) ||
+          normalize(t.specialty).includes(q) ||
+          normalize(t.city).includes(q) ||
+          normalize((t as any).location).includes(q) ||
+          normalize(t.bio).includes(q) ||
+          skills.some((skill) => normalize(skill).includes(q))
+        );
+      });
     }
 
     if (selectedSpecialty) {
-      filtered = filtered.filter(
-        (t) => normalize(t.specialty) === normalize(selectedSpecialty)
-      );
+      const specialtyQuery = normalize(selectedSpecialty);
+
+      filtered = filtered.filter((t) => {
+        const techSpecialty = normalize(t.specialty);
+        return (
+          techSpecialty === specialtyQuery ||
+          techSpecialty.includes(specialtyQuery)
+        );
+      });
     }
 
     if (selectedCity && selectedCity !== 'All Cities') {
       filtered = filtered.filter(
-        (t) => normalize(t.city) === normalize(selectedCity)
+        (t) =>
+          normalize(t.city) === normalize(selectedCity) ||
+          normalize((t as any).location) === normalize(selectedCity)
       );
     }
 
@@ -119,37 +166,52 @@ export function SearchPage() {
 
     if (availability) {
       filtered = filtered.filter(
-        (t) => normalize(t.availability || '') === normalize(availability)
+        (t) => normalize((t as any).availability) === normalize(availability)
       );
     }
 
     filtered.sort((a, b) => {
-      if (sortBy === 'rating') return Number(b.rating || 0) - Number(a.rating || 0);
-      if (sortBy === 'reviews') return Number(b.reviewCount || 0) - Number(a.reviewCount || 0);
+      if (sortBy === 'rating') {
+        return Number(b.rating || 0) - Number(a.rating || 0);
+      }
+
+      if (sortBy === 'reviews') {
+        return Number((b as any).reviewCount || 0) - Number((a as any).reviewCount || 0);
+      }
+
       if (sortBy === 'experience') {
         return Number(b.yearsExperience || 0) - Number(a.yearsExperience || 0);
       }
+
       if (sortBy === 'projects') {
-        return Number(b.completedProjects || 0) - Number(a.completedProjects || 0);
+        return Number((b as any).completedProjects || 0) - Number((a as any).completedProjects || 0);
       }
+
       return 0;
     });
 
-    setResults(filtered);
-  }, [query, selectedSpecialty, selectedCity, minRating, availability, sortBy, allTechnicians]);
+    return filtered;
+  }, [allTechnicians, query, selectedSpecialty, selectedCity, minRating, availability, sortBy]);
 
+  // State -> URL
   useEffect(() => {
-    const params: Record<string, string> = {};
+    const params = new URLSearchParams();
 
-    if (query.trim()) params.q = query.trim();
-    if (selectedSpecialty) params.specialty = selectedSpecialty;
-    if (selectedCity !== 'All Cities') params.city = selectedCity;
-    if (minRating > 0) params.minRating = String(minRating);
-    if (availability) params.availability = availability;
-    if (sortBy !== 'rating') params.sortBy = sortBy;
+    if (query.trim()) params.set('q', query.trim());
+    if (selectedSpecialty) params.set('specialty', selectedSpecialty);
+    if (selectedCity !== 'All Cities') params.set('city', selectedCity);
+    if (minRating > 0) params.set('minRating', String(minRating));
+    if (availability) params.set('availability', availability);
+    if (sortBy !== 'rating') params.set('sortBy', sortBy);
 
-    setSearchParams(params);
-  }, [query, selectedSpecialty, selectedCity, minRating, availability, sortBy, setSearchParams]);
+    const nextParamsString = params.toString();
+    const currentParamsString = searchParams.toString();
+
+    if (nextParamsString !== currentParamsString) {
+      isSyncingRef.current = true;
+      setSearchParams(params, { replace: true });
+    }
+  }, [query, selectedSpecialty, selectedCity, minRating, availability, sortBy, searchParams, setSearchParams]);
 
   const clearFilters = () => {
     setQuery('');
@@ -158,7 +220,14 @@ export function SearchPage() {
     setMinRating(0);
     setAvailability('');
     setSortBy('rating');
-    setSearchParams({});
+  };
+
+  const handleSpecialtyClick = (specialty: string) => {
+    setSelectedSpecialty((prev) => (prev === specialty ? '' : specialty));
+  };
+
+  const handleAllSpecialtiesClick = () => {
+    setSelectedSpecialty('');
   };
 
   const activeFiltersCount = [
@@ -217,7 +286,7 @@ export function SearchPage() {
           {/* Specialty Quick Filters */}
           <div className="flex flex-wrap gap-2 mt-4">
             <button
-              onClick={() => setSelectedSpecialty('')}
+              onClick={handleAllSpecialtiesClick}
               className={`px-3 py-1 rounded-full text-sm transition-colors ${
                 !selectedSpecialty
                   ? 'bg-white text-maroon'
@@ -227,10 +296,10 @@ export function SearchPage() {
             >
               All
             </button>
-            {SPECIALTIES.slice(0, 7).map(s => (
+            {SPECIALTIES.slice(0, 7).map((s) => (
               <button
                 key={s}
-                onClick={() => setSelectedSpecialty(selectedSpecialty === s ? '' : s)}
+                onClick={() => handleSpecialtyClick(s)}
                 className={`px-3 py-1 rounded-full text-sm transition-colors ${
                   selectedSpecialty === s
                     ? 'bg-white text-maroon'
@@ -274,13 +343,14 @@ export function SearchPage() {
                 onChange={e => setSelectedCity(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-border bg-input-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-maroon/30"
               >
-                {cities.map(c => (
+                {cities.map((c) => (
                   <option key={c} value={c}>
                     {c}
                   </option>
                 ))}
               </select>
             </div>
+
             <div>
               <label className="text-sm text-foreground mb-2 block" style={{ fontWeight: 500 }}>
                 <Star className="w-3.5 h-3.5 inline mr-1 text-gold" />
@@ -297,6 +367,7 @@ export function SearchPage() {
                 <option value={4.8}>4.8+ Stars</option>
               </select>
             </div>
+
             <div>
               <label className="text-sm text-foreground mb-2 block" style={{ fontWeight: 500 }}>
                 Availability
@@ -312,6 +383,7 @@ export function SearchPage() {
                 <option value="Busy">Busy</option>
               </select>
             </div>
+
             <div>
               <label className="text-sm text-foreground mb-2 block" style={{ fontWeight: 500 }}>
                 Sort By
@@ -327,6 +399,7 @@ export function SearchPage() {
                 <option value="projects">Most Projects</option>
               </select>
             </div>
+
             {activeFiltersCount > 0 && (
               <div className="sm:col-span-2 lg:col-span-4 flex justify-end">
                 <button
@@ -356,6 +429,7 @@ export function SearchPage() {
               </>
             )}
           </p>
+
           <select
             value={sortBy}
             onChange={e => setSortBy(e.target.value)}
@@ -400,7 +474,7 @@ export function SearchPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {results.map(tech => (
+            {results.map((tech) => (
               <TechnicianCard key={tech.id} technician={tech} />
             ))}
           </div>
