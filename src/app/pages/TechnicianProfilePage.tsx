@@ -76,34 +76,58 @@ export function TechnicianProfilePage() {
           return;
         }
 
+        const resolvedLocationText =
+          String(data.locationText || '').trim() ||
+          String(data.location || '').trim() ||
+          String(data.city || '').trim() ||
+          'Location not specified';
+
+        const resolvedHourlyRate =
+          String(data.hourlyRate || '').trim() ||
+          String(data.wage || '').trim() ||
+          String(data.wages || '').trim() ||
+          'Contact for pricing';
+
         const techData = {
-          id: techSnap.id,
-          name: data.name || 'Unknown Professional',
-          email: data.email || '',
-          phone: data.phone || '',
-          specialty: data.specialty || 'Professional',
-          location: data.location || data.city || 'Location not specified',
-          city: data.city || '',
-          avatar: data.avatar || data.photoURL || '',
-          role: data.role || 'technician',
-          bio: data.bio || 'No bio added yet.',
-          yearsExperience: Number(data.yearsExperience || 0),
-          rating: Number(data.rating || 0),
-          reviewCount: Number(data.totalReviews || data.reviewCount || 0),
-          skills: Array.isArray(data.skills) ? data.skills : [],
-          certifications: Array.isArray(data.certifications)
-            ? data.certifications
-            : [],
-          education: Array.isArray(data.education) ? data.education : [],
-          projects: Array.isArray(data.projects) ? data.projects : [],
-          reviews: Array.isArray(data.reviews) ? data.reviews : [],
-          availability: data.availability || 'Available',
-          hourlyRate: data.hourlyRate || 'Contact for pricing',
-          completedProjects: Number(data.completedProjects || 0),
-          joinedAt: data.joinedAt || '',
-          isVerified: Boolean(data.isVerified || false),
-          website: data.website || '',
-        };
+  id: techSnap.id,
+  name: data.name || 'Unknown Professional',
+  email: data.email || '',
+  phone: data.phone || '',
+  specialty: data.specialty || 'Professional',
+  location:
+    data.locationText ||
+    data.locationName ||
+    data.address ||
+    data.location ||
+    data.city ||
+    'Location not specified',
+  city: data.city || '',
+  avatar: data.avatar || data.photoURL || '',
+  role: data.role || 'technician',
+  bio: data.bio || 'No bio added yet.',
+  yearsExperience: Number(data.yearsExperience || 0),
+  rating: Number(data.rating || 0),
+  reviewCount: Number(data.totalReviews || data.reviewCount || 0),
+  skills: Array.isArray(data.skills) ? data.skills : [],
+  certifications: Array.isArray(data.certifications)
+    ? data.certifications
+    : [],
+  education: Array.isArray(data.education) ? data.education : [],
+  projects: Array.isArray(data.projects) ? data.projects : [],
+  reviews: Array.isArray(data.reviews) ? data.reviews : [],
+  availability: data.availability || 'Available',
+  hourlyRate:
+    data.hourlyRate ||
+    data.wages ||
+    data.wage ||
+    data.price ||
+    data.rate ||
+    'Contact for pricing',
+  completedProjects: Number(data.completedProjects || 0),
+  joinedAt: data.joinedAt || '',
+  isVerified: Boolean(data.isVerified || false),
+  website: data.website || '',
+};
 
         setTechnician(techData);
 
@@ -955,6 +979,23 @@ export function TechnicianProfilePage() {
                     </div>
                   </div>
                 )}
+
+                {technician.location && (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 bg-maroon-light rounded-lg flex items-center justify-center flex-shrink-0">
+                      <MapPin className="w-4 h-4 text-maroon" />
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">Location</p>
+                      <p
+                        className="text-foreground"
+                        style={{ fontWeight: 500 }}
+                      >
+                        {technician.location}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {technician.phone && (
@@ -1071,31 +1112,6 @@ export function TechnicianProfilePage() {
               <p className="text-muted-foreground text-xs">
                 Final pricing may vary by project scope. Request a detailed
                 quote.
-              </p>
-            </div>
-
-            <div className="bg-card border border-border rounded-xl p-5">
-              <div className="flex items-center gap-3 mb-2">
-                <Calendar className="w-4 h-4 text-maroon" />
-                <p className="text-foreground text-sm" style={{ fontWeight: 600 }}>
-                  Member Since
-                </p>
-              </div>
-              <p className="text-muted-foreground text-sm">
-                {technician.joinedAt
-                  ? new Date(technician.joinedAt).toLocaleDateString('en-LK', {
-                      year: 'numeric',
-                      month: 'long',
-                    })
-                  : 'Not available'}
-              </p>
-            </div>
-
-            <div className="flex items-start gap-2 p-3 rounded-xl bg-maroon-light border border-maroon/10">
-              <AlertCircle className="w-4 h-4 text-maroon mt-0.5 flex-shrink-0" />
-              <p className="text-muted-foreground text-xs leading-relaxed">
-                Always discuss project scope, timeline, and payment terms before
-                starting work.
               </p>
             </div>
           </div>

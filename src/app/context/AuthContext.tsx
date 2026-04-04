@@ -4,6 +4,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../firebase/config';
 
 export type UserRole = 'user' | 'technician';
+export type WageType = 'hourly' | 'daily' | 'project';
 
 export interface AuthUser {
   uid: string;
@@ -17,6 +18,8 @@ export interface AuthUser {
   address?: string;
   yearsExperience?: number;
   bio?: string;
+  wageAmount?: number;
+  wageType?: WageType | '';
   rating?: number;
   totalReviews?: number;
   avatar?: string;
@@ -42,6 +45,8 @@ interface FirestoreUserData {
   address?: string;
   yearsExperience?: number;
   bio?: string;
+  wageAmount?: number;
+  wageType?: WageType | '';
   rating?: number;
   totalReviews?: number;
   avatar?: string;
@@ -91,6 +96,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             address: data.address || '',
             yearsExperience: data.yearsExperience ?? 0,
             bio: data.bio || '',
+            wageAmount: data.wageAmount ?? 0,
+            wageType: data.wageType || '',
             rating: data.rating ?? 0,
             totalReviews: data.totalReviews ?? 0,
             avatar: data.avatar || '',
@@ -114,6 +121,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             address: '',
             yearsExperience: 0,
             bio: '',
+            wageAmount: 0,
+            wageType: '',
             rating: 0,
             totalReviews: 0,
             avatar: '',
