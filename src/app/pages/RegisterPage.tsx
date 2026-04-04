@@ -17,6 +17,7 @@ import { registerUser } from '../../firebase/authService';
 import { LocationPicker } from '../components/LocationPicker';
 
 type Role = 'user' | 'technician';
+type WageType = 'hourly' | 'daily' | 'project' | '';
 
 interface RegisterForm {
   name: string;
@@ -32,6 +33,8 @@ interface RegisterForm {
   locationText: string;
   lat: string;
   lng: string;
+  wageAmount: string;
+  wageType: WageType;
 }
 
 export function RegisterPage() {
@@ -55,6 +58,8 @@ export function RegisterPage() {
     locationText: '',
     lat: '',
     lng: '',
+    wageAmount: '',
+    wageType: '',
   });
 
   const update = (field: keyof RegisterForm, value: string) => {
@@ -69,6 +74,19 @@ export function RegisterPage() {
       lat: String(lat),
       lng: String(lng),
     }));
+  };
+
+  const formatHourlyRate = (amount: string, type: WageType) => {
+    const cleanAmount = String(amount || '').trim();
+    if (!cleanAmount || !type) return '';
+
+    const labelMap: Record<Exclude<WageType, ''>, string> = {
+      hourly: 'hour',
+      daily: 'day',
+      project: 'project',
+    };
+
+    return `Rs. ${cleanAmount} per ${labelMap[type]}`;
   };
 
   const validateStepTwo = () => {
@@ -96,13 +114,24 @@ export function RegisterPage() {
   };
 
   const validateTechnicianFields = () => {
-    if (!form.specialty || !form.yearsExperience || !form.bio.trim()) {
+    if (
+      !form.specialty ||
+      !form.yearsExperience ||
+      !form.bio.trim() ||
+      !form.wageAmount.trim() ||
+      !form.wageType
+    ) {
       alert('Please complete all professional details');
       return false;
     }
 
     if (Number(form.yearsExperience) < 1) {
       alert('Years of experience must be at least 1');
+      return false;
+    }
+
+    if (Number(form.wageAmount) <= 0) {
+      alert('Please enter a valid wage amount');
       return false;
     }
 
@@ -134,6 +163,11 @@ export function RegisterPage() {
     setLoading(true);
 
     try {
+      const hourlyRate =
+        role === 'technician'
+          ? formatHourlyRate(form.wageAmount, form.wageType)
+          : '';
+
       const payload = {
         ...form,
         name: form.name.trim(),
@@ -141,9 +175,13 @@ export function RegisterPage() {
         phone: form.phone.trim(),
         address: form.address.trim(),
         city: form.city.trim(),
+        specialty: form.specialty.trim(),
         bio: form.bio.trim(),
         age: form.age.trim(),
         yearsExperience: form.yearsExperience.trim(),
+        wageAmount: form.wageAmount.trim(),
+        wageType: form.wageType,
+        hourlyRate,
         locationText: form.locationText.trim(),
         lat: Number(form.lat),
         lng: Number(form.lng),
@@ -391,13 +429,13 @@ export function RegisterPage() {
                       type={showPassword ? 'text' : 'password'}
                       value={form.password}
                       onChange={(e) => update('password', e.target.value)}
-                      placeholder="Min 8 characters"
-                      className={`${inputClass} pr-10`}
+                      placeholder="Minimum 8 characters"
+                      className={`${inputClass} pr-11`}
                       required
                     />
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
+                      onClick={() => setShowPassword((prev) => !prev)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     >
                       {showPassword ? (
@@ -411,15 +449,9 @@ export function RegisterPage() {
 
                 <button
                   type="submit"
-                  disabled={loading}
-                  className="w-full bg-maroon hover:bg-maroon-dark disabled:opacity-60 text-white py-3 rounded-xl transition-colors flex items-center justify-center gap-2 font-semibold"
+                  className="w-full bg-maroon hover:bg-maroon-dark text-white py-3 rounded-xl transition-colors font-semibold"
                 >
-                  {loading
-                    ? 'Creating account...'
-                    : role === 'user'
-                    ? 'Create Account'
-                    : 'Continue'}
-                  {!loading && role === 'technician' && <ChevronRight className="w-4 h-4" />}
+                  {role === 'user' ? 'Create Client Account' : 'Continue'}
                 </button>
               </div>
             </form>
@@ -481,12 +513,47 @@ export function RegisterPage() {
                   />
                 </div>
 
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>Wage Amount (Rs.) *</label>
+                    <input
+                      type="number"
+                      value={form.wageAmount}
+                      onChange={(e) => update('wageAmount', e.target.value)}
+                      placeholder="e.g. 5000"
+                      className={inputClass}
+                      required
+                      min="1"
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelClass}>Wage Type *</label>
+                    <select
+                      value={form.wageType}
+                      onChange={(e) =>
+                        update(
+                          'wageType',
+                          e.target.value as WageType
+                        )
+                      }
+                      className={inputClass}
+                      required
+                    >
+                      <option value="">Select wage type</option>
+                      <option value="hourly">Hourly</option>
+                      <option value="daily">Daily</option>
+                      <option value="project">Project</option>
+                    </select>
+                  </div>
+                </div>
+
                 <div>
                   <label className={labelClass}>Professional Bio *</label>
                   <textarea
                     value={form.bio}
                     onChange={(e) => update('bio', e.target.value)}
-                    placeholder="Describe your expertise, skills, and what makes your work stand out..."
+                    placeholder="Describe your expertise, skills, and what makes your work stand out."
                     className={`${inputClass} resize-none`}
                     rows={4}
                     required

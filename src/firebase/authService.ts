@@ -16,7 +16,28 @@ type RegisterFormData = {
   locationText: string;
   lat: number | string;
   lng: number | string;
+  wageAmount: string;
+  wageType: 'hourly' | 'daily' | 'project' | '';
 };
+
+function buildHourlyRate(
+  wageAmount: string,
+  wageType: 'hourly' | 'daily' | 'project' | ''
+): string {
+  const cleanedAmount = String(wageAmount || '').trim();
+
+  if (!cleanedAmount || !wageType) {
+    return '';
+  }
+
+  const wageLabels = {
+    hourly: 'hour',
+    daily: 'day',
+    project: 'project',
+  } as const;
+
+  return `Rs. ${cleanedAmount} per ${wageLabels[wageType]}`;
+}
 
 export async function registerUser(
   role: 'user' | 'technician',
@@ -29,11 +50,20 @@ export async function registerUser(
   const cleanedAddress = form.address.trim();
   const cleanedBio = form.bio.trim();
   const cleanedLocationText = form.locationText.trim();
+  const cleanedSpecialty = form.specialty.trim();
 
   const parsedLat =
     typeof form.lat === 'number' ? form.lat : Number(form.lat);
   const parsedLng =
     typeof form.lng === 'number' ? form.lng : Number(form.lng);
+
+  const parsedAge = form.age ? Number(form.age) : null;
+  const parsedYearsExperience = form.yearsExperience
+    ? Number(form.yearsExperience)
+    : 0;
+  const parsedWageAmount = form.wageAmount ? Number(form.wageAmount) : 0;
+
+  const hourlyRate = buildHourlyRate(form.wageAmount, form.wageType);
 
   const userCredential = await createUserWithEmailAndPassword(
     auth,
@@ -50,12 +80,12 @@ export async function registerUser(
     phone: cleanedPhone,
     city: cleanedCity,
     address: cleanedAddress,
-    age: form.age ? Number(form.age) : null,
+    age: Number.isFinite(parsedAge as number) ? parsedAge : null,
     role,
     locationText: cleanedLocationText,
     lat: Number.isFinite(parsedLat) ? parsedLat : null,
     lng: Number.isFinite(parsedLng) ? parsedLng : null,
-    createdAt: serverTimestamp(),
+    joinedAt: serverTimestamp(),
   };
 
   if (role === 'user') {
@@ -65,11 +95,26 @@ export async function registerUser(
   } else {
     await setDoc(doc(db, 'users', firebaseUser.uid), {
       ...baseData,
-      specialty: form.specialty,
-      yearsExperience: form.yearsExperience ? Number(form.yearsExperience) : 0,
+      specialty: cleanedSpecialty,
+      yearsExperience: Number.isFinite(parsedYearsExperience)
+        ? parsedYearsExperience
+        : 0,
       bio: cleanedBio,
+      wageAmount: Number.isFinite(parsedWageAmount) ? parsedWageAmount : 0,
+      wageType: form.wageType || '',
+      hourlyRate: hourlyRate || 'Contact for pricing',
       rating: 0,
       totalReviews: 0,
+      reviewCount: 0,
+      completedProjects: 0,
+      availability: 'Available',
+      reviews: [],
+      skills: [],
+      certifications: [],
+      education: [],
+      projects: [],
+      isVerified: false,
+      website: '',
     });
   }
 
