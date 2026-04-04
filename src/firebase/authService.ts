@@ -13,6 +13,9 @@ type RegisterFormData = {
   specialty: string;
   yearsExperience: string;
   bio: string;
+  locationText: string;
+  lat: number | string;
+  lng: number | string;
 };
 
 export async function registerUser(
@@ -25,6 +28,12 @@ export async function registerUser(
   const cleanedCity = form.city.trim();
   const cleanedAddress = form.address.trim();
   const cleanedBio = form.bio.trim();
+  const cleanedLocationText = form.locationText.trim();
+
+  const parsedLat =
+    typeof form.lat === 'number' ? form.lat : Number(form.lat);
+  const parsedLng =
+    typeof form.lng === 'number' ? form.lng : Number(form.lng);
 
   const userCredential = await createUserWithEmailAndPassword(
     auth,
@@ -43,6 +52,9 @@ export async function registerUser(
     address: cleanedAddress,
     age: form.age ? Number(form.age) : null,
     role,
+    locationText: cleanedLocationText,
+    lat: Number.isFinite(parsedLat) ? parsedLat : null,
+    lng: Number.isFinite(parsedLng) ? parsedLng : null,
     createdAt: serverTimestamp(),
   };
 

@@ -9,6 +9,7 @@ import { SPECIALTIES } from '../types';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../../firebase/config';
+import { LocationPicker } from '../components/LocationPicker';
 
 type EduType = 'degree' | 'certification' | 'training';
 
@@ -44,6 +45,9 @@ interface ProfileFormState {
   hourlyRate: string;
   avatar: string;
   joinedAt: string;
+  locationText: string;
+  lat: string;
+  lng: string;
 }
 
 export function ProfilePage() {
@@ -67,6 +71,9 @@ export function ProfilePage() {
     hourlyRate: '',
     avatar: '',
     joinedAt: '',
+    locationText: '',
+    lat: '',
+    lng: '',
   });
 
   const [eduItems, setEduItems] = useState<EduItem[]>([]);
@@ -124,6 +131,9 @@ export function ProfilePage() {
         hourlyRate: data.hourlyRate || '',
         avatar: data.avatar || currentUser.avatar || currentUser.photoURL || '',
         joinedAt: data.joinedAt || '',
+        locationText: data.locationText || data.city || '',
+        lat: data.lat !== undefined && data.lat !== null ? String(data.lat) : '',
+        lng: data.lng !== undefined && data.lng !== null ? String(data.lng) : '',
       });
 
       setEduItems((data.education as EduItem[]) || []);
@@ -164,6 +174,9 @@ export function ProfilePage() {
           joinedAt:
             profileForm.joinedAt || new Date().toISOString(),
           role: currentUser.role,
+          locationText: profileForm.locationText.trim(),
+          lat: profileForm.lat ? Number(profileForm.lat) : null,
+          lng: profileForm.lng ? Number(profileForm.lng) : null,
         },
         { merge: true }
       );
@@ -467,12 +480,30 @@ export function ProfilePage() {
                 <MapPin className="w-3.5 h-3.5 text-maroon" /> City
               </label>
               {editing ? (
-                <input
-                  type="text"
-                  value={profileForm.city}
-                  onChange={e => setProfileForm(prev => ({ ...prev, city: e.target.value }))}
-                  className={inputClass}
-                />
+                currentUser.role === 'technician' ? (
+                  <div className="space-y-2">
+                    <LocationPicker
+                      onLocationChange={(lat, lng, address) =>
+                        setProfileForm(prev => ({
+                          ...prev,
+                          city: address,
+                          locationText: address,
+                          lat: String(lat),
+                          lng: String(lng),
+                        }))
+                      }
+                      initialAddress={profileForm.locationText || profileForm.city}
+                      compact
+                    />
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={profileForm.city}
+                    onChange={e => setProfileForm(prev => ({ ...prev, city: e.target.value }))}
+                    className={inputClass}
+                  />
+                )
               ) : (
                 <p className="text-foreground text-sm py-2.5">{profileForm.city || '—'}</p>
               )}

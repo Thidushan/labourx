@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { Loader2, MapPin as MapPinIcon, ExternalLink } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import { MapPin as MapPinIcon, ExternalLink } from 'lucide-react';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
 export interface MapPin {
   id: string;
   lat: number;
@@ -22,315 +23,275 @@ interface NearbyMapProps {
   pins: MapPin[];
   userLat: number | null;
   userLng: number | null;
-  isGoogleLoaded: boolean;
-  googleLoadError: boolean;
   selectedPinId?: string | null;
   onPinClick?: (pin: MapPin) => void;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-const IS_PLACEHOLDER_KEY =
-  typeof window !== 'undefined' &&
-  (window as any).__GMAPS_KEY === 'YOUR_GOOGLE_MAPS_API_KEY';
+const REGION = import.meta.env.VITE_AWS_REGION;
+const MAP_NAME = import.meta.env.VITE_AWS_MAP_NAME;
+const API_KEY = import.meta.env.VITE_AWS_API_KEY;
 
-function pinSvg(color: string, label: string, size: number): string {
-  const hw = size / 2;
-  const dropH = Math.round(size * 1.25);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${dropH}" viewBox="0 0 ${size} ${dropH}">
-    <defs>
-      <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-opacity="0.35"/>
-      </filter>
-    </defs>
-    <g filter="url(#sh)">
-      <path d="M${hw} 2
-        C ${hw * 0.44} 2, 2 ${hw * 0.56}, 2 ${hw}
-        C 2 ${hw * 1.55}, ${hw} ${dropH - 3}, ${hw} ${dropH - 3}
-        S ${size - 2} ${hw * 1.55}, ${size - 2} ${hw}
-        C ${size - 2} ${hw * 0.56}, ${hw * 1.56} 2, ${hw} 2Z"
-        fill="${color}"/>
-      <circle cx="${hw}" cy="${hw}" r="${hw * 0.55}" fill="rgba(255,255,255,0.22)"/>
-      <text x="${hw}" y="${hw * 1.35}" text-anchor="middle"
-        font-family="system-ui,Arial,sans-serif" font-size="${size * 0.34}"
-        font-weight="700" fill="white">${label}</text>
-    </g>
-  </svg>`;
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+function getPinColor(pin: MapPin, isSelected: boolean) {
+  if (pin.type === 'professional') {
+    return isSelected ? '#6E1425' : '#8B1A2F';
+  }
+  return isSelected ? '#B8933C' : '#C9A84C';
 }
 
-function userDotSvg(): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
-    <circle cx="11" cy="11" r="9" fill="#4285F4" stroke="white" stroke-width="3"/>
-    <circle cx="11" cy="11" r="3.5" fill="white"/>
-  </svg>`;
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+function createMarkerElement(pin: MapPin, isSelected: boolean) {
+  const el = document.createElement('div');
+  const color = getPinColor(pin, isSelected);
+  const label =
+    pin.specialty?.[0]?.toUpperCase() ?? (pin.type === 'professional' ? 'P' : 'J');
+
+  el.style.width = isSelected ? '42px' : '34px';
+  el.style.height = isSelected ? '42px' : '34px';
+  el.style.borderRadius = '9999px';
+  el.style.background = color;
+  el.style.color = 'white';
+  el.style.display = 'flex';
+  el.style.alignItems = 'center';
+  el.style.justifyContent = 'center';
+  el.style.fontWeight = '700';
+  el.style.fontSize = isSelected ? '14px' : '12px';
+  el.style.border = '2px solid white';
+  el.style.boxShadow = '0 3px 10px rgba(0,0,0,0.25)';
+  el.style.cursor = 'pointer';
+  el.textContent = label;
+
+  return el;
 }
 
-function infoHtml(pin: MapPin): string {
-  const availColor =
-    pin.availability === 'Available' ? '#16a34a' :
-    pin.availability === 'Limited'   ? '#d97706' : '#dc2626';
-  const dist =
-    pin.distance === undefined ? '' :
-    pin.distance < 1
-      ? `📍 ${Math.round(pin.distance * 1000)}m away`
-      : `📍 ${pin.distance.toFixed(1)} km away`;
+function getPopupHtml(pin: MapPin) {
+  const availabilityColor =
+    pin.availability === 'Available'
+      ? '#16a34a'
+      : pin.availability === 'Limited'
+      ? '#d97706'
+      : '#dc2626';
 
-  return `<div style="font-family:system-ui,Arial,sans-serif;padding:12px 14px;min-width:190px;max-width:240px;">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-      ${pin.avatar
-        ? `<img src="${pin.avatar}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #8B1A2F;flex-shrink:0;" onerror="this.style.display='none'">`
-        : `<div style="width:40px;height:40px;border-radius:50%;background:#8B1A2F;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:16px;flex-shrink:0;">${pin.title[0]}</div>`}
-      <div style="min-width:0;">
-        <p style="margin:0 0 2px;font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${pin.title}</p>
-        <p style="margin:0;color:#555;font-size:11px;">${pin.subtitle}</p>
+  const distanceText =
+    pin.distance === undefined
+      ? ''
+      : pin.distance < 1
+      ? `${Math.round(pin.distance * 1000)}m away`
+      : `${pin.distance.toFixed(1)} km away`;
+
+  return `
+    <div style="font-family: system-ui, Arial, sans-serif; min-width: 200px; max-width: 260px;">
+      <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
+        ${
+          pin.avatar
+            ? `<img src="${pin.avatar}" style="width:42px;height:42px;border-radius:12px;object-fit:cover;" onerror="this.style.display='none'" />`
+            : `<div style="width:42px;height:42px;border-radius:12px;background:#8B1A2F;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;">${pin.title.charAt(0)}</div>`
+        }
+        <div style="min-width:0;">
+          <div style="font-weight:700;font-size:13px; color:#111827; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${pin.title}</div>
+          <div style="font-size:11px; color:#6B7280;">${pin.subtitle}</div>
+        </div>
       </div>
+
+      <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+        ${
+          pin.rating
+            ? `<span style="font-size:11px; padding:2px 8px; border-radius:999px; background:#fdf8ec; color:#B8933C; font-weight:700;">★ ${pin.rating.toFixed(1)}</span>`
+            : ''
+        }
+        ${
+          pin.availability
+            ? `<span style="font-size:11px; padding:2px 8px; border-radius:999px; background:${availabilityColor}18; color:${availabilityColor}; font-weight:600;">${pin.availability}</span>`
+            : ''
+        }
+        ${
+          pin.budgetRange
+            ? `<span style="font-size:11px; padding:2px 8px; border-radius:999px; background:#f3f4f6; color:#374151;">${pin.budgetRange}</span>`
+            : ''
+        }
+      </div>
+
+      ${
+        distanceText
+          ? `<div style="font-size:11px; color:#8B1A2F; font-weight:600; margin-bottom:10px;">${distanceText}</div>`
+          : ''
+      }
+
+      <a href="${pin.link}" style="display:block; text-align:center; text-decoration:none; background:#8B1A2F; color:white; padding:8px 12px; border-radius:10px; font-size:12px; font-weight:700;">
+        ${pin.type === 'professional' ? 'View Profile →' : 'View Project →'}
+      </a>
     </div>
-    <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-bottom:10px;">
-      ${pin.rating ? `<span style="background:#fdf8ec;color:#B8933C;font-size:11px;font-weight:700;padding:2px 7px;border-radius:99px;border:1px solid #C9A84C40;">★ ${pin.rating}</span>` : ''}
-      ${pin.availability ? `<span style="color:${availColor};font-size:11px;font-weight:600;background:${availColor}18;padding:2px 7px;border-radius:99px;">${pin.availability}</span>` : ''}
-      ${pin.budgetRange ? `<span style="color:#444;font-size:11px;background:#f3f3f5;padding:2px 7px;border-radius:99px;">${pin.budgetRange}</span>` : ''}
-      ${dist ? `<span style="color:#888;font-size:11px;">${dist}</span>` : ''}
-    </div>
-    <a href="${pin.link}" style="display:block;background:#8B1A2F;color:white;text-align:center;padding:7px;border-radius:8px;text-decoration:none;font-size:12px;font-weight:600;">
-      ${pin.type === 'professional' ? 'View Profile →' : 'View Project →'}
-    </a>
-  </div>`;
+  `;
 }
 
-// ─── Fake map pins overlay (shown in fallback state) ─────────────────────────
-const FAKE_POSITIONS = [
-  { top: '28%', left: '38%' }, { top: '55%', left: '62%' },
-  { top: '40%', left: '20%' }, { top: '68%', left: '46%' },
-  { top: '22%', left: '70%' }, { top: '50%', left: '80%' },
-];
-
-// ─── Main Component ───────────────────────────────────────────────────────────
 export function NearbyMap({
   pins,
   userLat,
   userLng,
-  isGoogleLoaded,
-  googleLoadError,
   selectedPinId,
   onPinClick,
 }: NearbyMapProps) {
-  const mapDivRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<google.maps.Map | null>(null);
-  const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
-  const infoWinRef = useRef<google.maps.InfoWindow | null>(null);
-  const userMarkerRef = useRef<google.maps.Marker | null>(null);
-  const [mapReady, setMapReady] = useState(false);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const pinMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
 
-  // ── Init map ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!isGoogleLoaded || !mapDivRef.current || mapRef.current) return;
-    const center = {
-      lat: userLat ?? 19.076,
-      lng: userLng ?? 72.8777,
-    };
-    mapRef.current = new google.maps.Map(mapDivRef.current, {
-      center,
-      zoom: userLat ? 11 : 5,
-      mapTypeControl: false,
-      streetViewControl: false,
-      fullscreenControl: true,
-      zoomControlOptions: { position: google.maps.ControlPosition.RIGHT_CENTER },
-      styles: [
-        { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-        { featureType: 'transit', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-      ],
-    });
-    infoWinRef.current = new google.maps.InfoWindow({ maxWidth: 260 });
-    setMapReady(true);
-  }, [isGoogleLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── User location marker ──────────────────────────────────────────────────
-  useEffect(() => {
-    if (!mapReady || !mapRef.current || userLat === null || userLng === null) return;
-    const pos = { lat: userLat, lng: userLng };
-    const userIcon: google.maps.Icon = {
-      url: userDotSvg(),
-      scaledSize: new google.maps.Size(22, 22),
-      anchor: new google.maps.Point(11, 11),
-    };
-    if (userMarkerRef.current) {
-      userMarkerRef.current.setPosition(pos);
-    } else {
-      userMarkerRef.current = new google.maps.Marker({
-        position: pos,
-        map: mapRef.current,
-        title: 'Your Location',
-        icon: userIcon,
-        zIndex: 999,
-      });
+    if (!mapContainerRef.current || mapRef.current) return;
+    if (!REGION || !MAP_NAME || !API_KEY) {
+      console.error('Missing AWS Location environment variables for NearbyMap');
+      return;
     }
-    mapRef.current.panTo(pos);
-  }, [mapReady, userLat, userLng]);
 
-  // ── Pins / markers ────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!mapReady || !mapRef.current) return;
-    const map = mapRef.current;
-    const currentIds = new Set(markersRef.current.keys());
-    const incomingIds = new Set(pins.map(p => p.id));
-
-    // Remove stale
-    currentIds.forEach(id => {
-      if (!incomingIds.has(id)) {
-        markersRef.current.get(id)?.setMap(null);
-        markersRef.current.delete(id);
-      }
+    const map = new maplibregl.Map({
+      container: mapContainerRef.current,
+      style: `https://maps.geo.${REGION}.amazonaws.com/maps/v0/maps/${MAP_NAME}/style-descriptor?key=${API_KEY}`,
+      center:
+        userLat !== null && userLng !== null ? [userLng, userLat] : [80.7718, 7.8731],
+      zoom: userLat !== null && userLng !== null ? 11 : 7,
     });
 
-    // Add / update
-    pins.forEach(pin => {
-      const isSelected = pin.id === selectedPinId;
-      const color = pin.type === 'professional'
-        ? (isSelected ? '#6E1425' : '#8B1A2F')
-        : (isSelected ? '#B8933C' : '#C9A84C');
-      const label = pin.specialty?.[0]?.toUpperCase() ?? (pin.type === 'professional' ? 'P' : 'J');
-      const size = isSelected ? 42 : 34;
-      const icon: google.maps.Icon = {
-        url: pinSvg(color, label, size),
-        scaledSize: new google.maps.Size(size, Math.round(size * 1.25)),
-        anchor: new google.maps.Point(size / 2, Math.round(size * 1.25)),
-      };
+    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    mapRef.current = map;
 
-      if (markersRef.current.has(pin.id)) {
-        const m = markersRef.current.get(pin.id)!;
-        m.setIcon(icon);
-        m.setZIndex(isSelected ? 100 : 1);
-      } else {
-        const marker = new google.maps.Marker({
-          position: { lat: pin.lat, lng: pin.lng },
-          map,
-          title: pin.title,
-          icon,
-          zIndex: isSelected ? 100 : 1,
-        });
-        marker.addListener('click', () => {
-          infoWinRef.current?.setContent(infoHtml(pin));
-          infoWinRef.current?.open(map, marker);
-          onPinClick?.(pin);
-        });
-        markersRef.current.set(pin.id, marker);
-      }
+    map.on('load', () => {
+      map.resize();
     });
-  }, [mapReady, pins, selectedPinId, onPinClick]);
 
-  // ── Pan to selected pin ───────────────────────────────────────────────────
-  useEffect(() => {
-    if (!mapReady || !mapRef.current || !selectedPinId) return;
-    const pin = pins.find(p => p.id === selectedPinId);
-    if (!pin) return;
-    mapRef.current.panTo({ lat: pin.lat, lng: pin.lng });
-    const marker = markersRef.current.get(selectedPinId);
-    if (marker && infoWinRef.current) {
-      infoWinRef.current.setContent(infoHtml(pin));
-      infoWinRef.current.open(mapRef.current, marker);
-    }
-  }, [selectedPinId, mapReady, pins]);
-
-  // ── Cleanup ───────────────────────────────────────────────────────────────
-  useEffect(() => {
     return () => {
-      markersRef.current.forEach(m => m.setMap(null));
-      markersRef.current.clear();
-      userMarkerRef.current?.setMap(null);
+      pinMarkersRef.current.forEach((marker) => marker.remove());
+      pinMarkersRef.current.clear();
+      userMarkerRef.current?.remove();
+      map.remove();
+      mapRef.current = null;
     };
   }, []);
 
-  // ─── Fallback: API key is placeholder or load errored ─────────────────────
-  if (googleLoadError) {
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    const resizeMap = () => {
+      mapRef.current?.resize();
+    };
+
+    const timeout = window.setTimeout(resizeMap, 100);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [pins, selectedPinId, userLat, userLng]);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    if (userLat === null || userLng === null) {
+      if (userMarkerRef.current) {
+        userMarkerRef.current.remove();
+        userMarkerRef.current = null;
+      }
+      return;
+    }
+
+    const userEl = document.createElement('div');
+    userEl.style.width = '22px';
+    userEl.style.height = '22px';
+    userEl.style.borderRadius = '9999px';
+    userEl.style.background = '#4285F4';
+    userEl.style.border = '4px solid white';
+    userEl.style.boxShadow = '0 2px 8px rgba(0,0,0,0.25)';
+
+    if (userMarkerRef.current) {
+      userMarkerRef.current.setLngLat([userLng, userLat]);
+    } else {
+      userMarkerRef.current = new maplibregl.Marker({ element: userEl })
+        .setLngLat([userLng, userLat])
+        .setPopup(
+          new maplibregl.Popup({ offset: 16 }).setHTML(
+            '<div style="font-weight:600;">Your Location</div>'
+          )
+        )
+        .addTo(mapRef.current);
+    }
+
+    mapRef.current.flyTo({
+      center: [userLng, userLat],
+      zoom: 11,
+      essential: true,
+    });
+  }, [userLat, userLng]);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    pinMarkersRef.current.forEach((marker) => marker.remove());
+    pinMarkersRef.current.clear();
+
+    pins.forEach((pin) => {
+      const isSelected = pin.id === selectedPinId;
+      const el = createMarkerElement(pin, isSelected);
+
+      const popup = new maplibregl.Popup({ offset: 18 }).setHTML(getPopupHtml(pin));
+
+      const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat([pin.lng, pin.lat])
+        .setPopup(popup)
+        .addTo(mapRef.current!);
+
+      el.addEventListener('click', () => {
+        onPinClick?.(pin);
+      });
+
+      pinMarkersRef.current.set(pin.id, marker);
+    });
+  }, [pins, selectedPinId, onPinClick]);
+
+  useEffect(() => {
+    if (!mapRef.current || !selectedPinId) return;
+
+    const selectedPin = pins.find((pin) => pin.id === selectedPinId);
+    const selectedMarker = pinMarkersRef.current.get(selectedPinId);
+
+    if (!selectedPin || !selectedMarker) return;
+
+    mapRef.current.flyTo({
+      center: [selectedPin.lng, selectedPin.lat],
+      zoom: 13,
+      essential: true,
+    });
+
+    selectedMarker.togglePopup();
+  }, [selectedPinId, pins]);
+
+  if (!REGION || !MAP_NAME || !API_KEY) {
     return (
-      <div className="w-full h-full min-h-[420px] bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-xl border border-border flex flex-col items-center justify-center relative overflow-hidden">
-        {/* Grid bg */}
-        <div
-          className="absolute inset-0 opacity-[0.07]"
-          style={{
-            backgroundImage:
-              'linear-gradient(rgba(0,0,0,0.4) 1px,transparent 1px),linear-gradient(90deg,rgba(0,0,0,0.4) 1px,transparent 1px)',
-            backgroundSize: '48px 48px',
-          }}
-        />
-        {/* Fake roads */}
-        <svg className="absolute inset-0 w-full h-full opacity-10 pointer-events-none">
-          <line x1="15%" y1="0" x2="35%" y2="100%" stroke="#555" strokeWidth="3" />
-          <line x1="0" y1="38%" x2="100%" y2="32%" stroke="#555" strokeWidth="3" />
-          <line x1="58%" y1="0" x2="48%" y2="100%" stroke="#666" strokeWidth="2" />
-          <line x1="0" y1="68%" x2="100%" y2="72%" stroke="#666" strokeWidth="2" />
-          <rect x="22%" y="22%" width="20%" height="13%" rx="5" fill="#aaa" opacity="0.3" />
-          <rect x="55%" y="46%" width="16%" height="11%" rx="5" fill="#aaa" opacity="0.3" />
-        </svg>
-
-        {/* Fake pins */}
-        {pins.slice(0, 6).map((pin, i) => {
-          const pos = FAKE_POSITIONS[i];
-          if (!pos) return null;
-          const bg = pin.type === 'professional' ? '#8B1A2F' : '#C9A84C';
-          return (
-            <button
-              key={pin.id}
-              onClick={() => onPinClick?.(pin)}
-              className="absolute z-10 flex flex-col items-center group"
-              style={{ top: pos.top, left: pos.left, transform: 'translate(-50%,-100%)' }}
-            >
-              <div
-                className="w-8 h-8 rounded-full border-2 border-white shadow-md flex items-center justify-center text-white text-xs font-bold"
-                style={{ background: bg }}
-              >
-                {pin.specialty?.[0] ?? 'P'}
-              </div>
-              <div
-                className="w-0 h-0 border-l-4 border-r-4 border-t-6 border-l-transparent border-r-transparent"
-                style={{ borderTopColor: bg, borderTopWidth: '6px', borderLeftWidth: '4px', borderRightWidth: '4px' }}
-              />
-              <div className="absolute bottom-[110%] bg-card border border-border text-foreground text-xs px-2 py-1 rounded-lg shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                {pin.title}
-              </div>
-            </button>
-          );
-        })}
-
-        {/* Info card */}
-        <div className="relative z-20 bg-card/95 backdrop-blur-sm border border-border rounded-2xl p-6 max-w-sm mx-6 text-center shadow-xl">
-          <div className="w-14 h-14 bg-maroon/10 border-2 border-maroon/20 rounded-2xl flex items-center justify-center mx-auto mb-3">
-            <MapPinIcon className="w-7 h-7 text-maroon" />
-          </div>
-          <h3 className="text-foreground mb-1" style={{ fontWeight: 700, fontSize: '1rem' }}>
-            Google Maps Integration Ready
-          </h3>
-          <p className="text-muted-foreground text-sm mb-4 leading-relaxed">
-            Add your Google Maps API key in{' '}
-            <code className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono text-maroon">
-              NearbyMapPage.tsx
-            </code>{' '}
-            to enable the live interactive map.
-          </p>
-          <a
-            href="https://developers.google.com/maps/documentation/javascript/get-api-key"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 bg-maroon hover:bg-maroon-dark text-white px-4 py-2 rounded-lg text-sm transition-colors"
-            style={{ fontWeight: 500 }}
-          >
-            Get API Key <ExternalLink className="w-3.5 h-3.5" />
-          </a>
-        </div>
+      <div className="w-full h-full min-h-[420px] bg-muted/30 border border-border rounded-xl flex flex-col items-center justify-center text-center p-6">
+        <MapPinIcon className="w-10 h-10 text-muted-foreground mb-3" />
+        <p className="text-foreground" style={{ fontWeight: 600 }}>
+          AWS map is not configured
+        </p>
+        <p className="text-muted-foreground text-sm mt-1">
+          Check VITE_AWS_REGION, VITE_AWS_MAP_NAME, and VITE_AWS_API_KEY.
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="w-full h-full min-h-[420px] relative rounded-xl overflow-hidden border border-border shadow-sm">
-      {!mapReady && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-muted z-10">
-          <Loader2 className="w-8 h-8 text-maroon animate-spin mb-3" />
-          <p className="text-muted-foreground text-sm">Loading map…</p>
+    <div className="w-full h-full min-h-[420px] relative bg-background">
+      <div ref={mapContainerRef} className="w-full h-full" />
+
+      <div className="absolute top-4 left-4 z-10 bg-card/95 backdrop-blur-sm border border-border rounded-xl px-3 py-2 shadow-sm">
+        <div className="flex items-center gap-2 text-sm text-foreground">
+          <MapPinIcon className="w-4 h-4 text-maroon" />
+          <span style={{ fontWeight: 600 }}>{pins.length}</span>
+          <span className="text-muted-foreground">
+            result{pins.length !== 1 ? 's' : ''}
+          </span>
         </div>
-      )}
-      <div ref={mapDivRef} className="w-full h-full" />
+      </div>
+
+      <div className="absolute bottom-4 right-4 z-10 bg-card/95 backdrop-blur-sm border border-border rounded-xl px-3 py-2 shadow-sm text-xs text-muted-foreground flex items-center gap-2">
+        <ExternalLink className="w-3.5 h-3.5" />
+        AWS Nearby Map
+      </div>
     </div>
   );
 }
